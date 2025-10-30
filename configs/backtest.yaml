@@ -1,0 +1,46 @@
+universes:
+  crypto:
+    symbols: ["BTC-USD","ETH-USD"]
+    timeframe: "1h"
+    session:
+      use_regular_hours_only: false
+      timezone: "UTC"
+  equities_etf:
+    symbols: ["AAPL","NVDA","GOOGL","TSLA","AMZN","QQQ","SPY"]
+    timeframe: "1h"
+    session:
+      use_regular_hours_only: true
+      timezone: "America/New_York"    # exchange time
+
+costs:
+  commission_bps: 1.0                 # 0.01% per side
+  slippage_bps: 1.5
+  borrow_fee_bps_daily: 0.0
+
+risk:
+  per_trade_risk_pct: 0.5
+  max_concurrent_positions: 5
+  capital:
+    initial_cash: 100000
+    reinvest_profits: true
+
+execution:
+  entry_fill: "next_open"             # after the signal bar closes
+  stop_type: "stop_market"
+  target_type: "limit"
+  gap_handling: "worse_price"
+
+walk_forward:
+  train_start: "2019-01-01"
+  train_end:   "2022-12-31"
+  validate_end: "2023-12-31"
+  test_end:    "2025-06-30"
+  roll_years: 1
+
+report:
+  metrics: ["CAGR","Sharpe","Sortino","MaxDD","Calmar","PF","HitRate","AvgR","Exposure","Turnover"]
+  plots:
+    - "equity_curve"
+    - "drawdown"
+    - "per_class_contribution"
+    - "monthly_heatmap"

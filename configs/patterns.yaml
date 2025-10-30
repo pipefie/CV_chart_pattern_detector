@@ -1,0 +1,154 @@
+meta:
+  timeframe: "1h"
+  comment: "Settings tuned for 1h bars on crypto & US large-caps; ATR-based thresholds sized for intraday noise."
+
+common:
+  pivots:
+    method: "prominence"
+    use_atr_scaled: true           # treat thresholds in ATR units (intraday-friendly)
+    min_prominence_atr: 0.7        # peaks/valleys must stand out ≥0.7×ATR
+    min_distance_bars: 6           # avoid micro-zigzags
+    smoothing_window_bars: 3
+
+  lines:
+    max_rmsd_pct_of_height: 0.35   # deviation from fitted line vs pattern height
+    near_horizontal_max_deg: 12
+    parallel_max_angle_diff_deg: 10
+
+  windows:
+    min_bars: 24                   # 1 day of 1h bars
+    max_bars: 160                  # up to ~1 week
+    step_bars: 4
+
+  nms:
+    iou_threshold: 0.35
+    keep_top_k: 100
+
+patterns:
+  # 1) Head & Shoulders family (2 classes)
+  head_and_shoulders:
+    class_id: 0
+    direction: "bearish"
+    geometry:
+      required_peaks: 3
+      order: "peak-valley-peak-valley-peak"
+      head_above_shoulders_min_atr: 0.8
+      shoulder_height_similarity_pct: 25
+      shoulder_timing_similarity_pct: 40
+      neckline:
+        type: "line"
+        max_slope_deg: 12
+        max_rmsd_pct_of_height: 0.4
+      duration:
+        min_bars: 36
+        max_bars: 200
+    breakout:
+      side: "down"
+      confirm:
+        type: "close_beyond_line"
+        threshold_atr: 0.35         # close ≤ neckline − 0.35×ATR
+    invalidation:
+      closes_back_above_neckline_within_bars: 10
+      right_shoulder_exceeds_head_atr: 0.25
+    trade_plan:
+      entry: "next_open_after_breakout"
+      stop:
+        mode: "swing_point"
+        swing: "above_right_shoulder"
+      target:
+        mode: "measured_move"       # (head - neckline)
+        rr_fallback: 2.0
+      risk:
+        pct_of_equity: 0.5
+
+  inverse_head_and_shoulders:
+    class_id: 1
+    direction: "bullish"
+    inherits: "head_and_shoulders"
+    breakout:
+      side: "up"
+      confirm:
+        type: "close_beyond_line"
+      # same 0.35 ATR in opposite direction
+    trade_plan:
+      stop:
+        mode: "swing_point"
+        swing: "below_right_shoulder"
+
+  # 2) Double Top/Bottom family (2 classes)
+  double_top:
+    class_id: 2
+    direction: "bearish"
+    geometry:
+      peaks: 2
+      peak_height_similarity_pct: 20
+      valley_required: true
+      duration:
+        min_bars: 16
+        max_bars: 120
+      neckline:
+        type: "level"
+        max_rmsd_pct_of_height: 0.3
+    breakout:
+      side: "down"
+      confirm:
+        type: "close_beyond_level"
+        threshold_percent: 0.12      # ~0.12% beyond neckline (large caps 1h)
+    invalidation:
+      second_peak_exceeds_first_pct: 0.6
+    trade_plan:
+      entry: "next_open_after_breakout"
+      stop:
+        mode: "swing_point"
+        swing: "above_second_peak"
+      target:
+        mode: "measured_move"
+
+  double_bottom:
+    class_id: 3
+    direction: "bullish"
+    inherits: "double_top"
+    breakout:
+      side: "up"
+      confirm:
+        type: "close_beyond_level"
+        threshold_percent: 0.12
+    trade_plan:
+      stop:
+        mode: "swing_point"
+        swing: "below_second_bottom"
+
+  # 3) Descending Triangle (1 class; bullish twin not in this scope)
+  descending_triangle:
+    class_id: 4
+    direction: "bearish"
+    geometry:
+      upper_trendline:
+        type: "descending_line"
+        min_touches: 3
+        max_gap_bars: 12
+      lower_boundary:
+        type: "level"
+        max_rmsd_pct_of_height: 0.35
+      duration:
+        min_bars: 24
+        max_bars: 200
+      apex_within_window_pct: 85
+    breakout:
+      side: "down"
+      confirm:
+        type: "close_beyond_level"
+        threshold_atr: 0.3
+    trade_plan:
+      stop:
+        mode: "atr"
+        atr_mult: 1.6
+      target:
+        mode: "measured_move"        # widest part height
+
+labels:
+  0: "head_and_shoulders"
+  1: "inverse_head_and_shoulders"
+  2: "double_top"
+  3: "double_bottom"
+  4: "descending_triangle"

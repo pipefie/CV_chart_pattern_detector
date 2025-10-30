@@ -1,0 +1,43 @@
+canvas:
+  width: 960
+  height: 640
+  dpi: 120
+  bg_color: "white"
+
+chart:
+  type: "candlestick"                 # keep consistent for training
+  margin_pct: 7
+  wick_thickness_px: [1, 2]
+  body_thickness_px: [3, 5]
+  bull_color: ["#2ca02c", "#10a779"]
+  bear_color: ["#d62728", "#ea4335"]
+  grid:
+    enabled: [true, false]
+    alpha: 0.2
+
+axes:
+  show_ticks: [true, false]
+  font_family: ["DejaVu Sans", "Arial", "Liberation Sans"]
+  font_size: [9, 11, 13]
+  y_scale: "linear"
+
+overlays:
+  moving_averages:
+    enabled: false
+  volume:
+    enabled: false
+  watermark:
+    enabled: false
+
+style_jitter:
+  blur_sigma: [0.0, 0.5]
+  noise_std: [0.0, 0.01]
+  contrast_gamma: [0.92, 1.08]
+  jpeg_quality: [85, 100]             # exported PNG; use when saving extra JPEG versions
+  slight_perspective: false
+
+export:
+  format: "png"
+  compress_level: 3
+  naming:
+    schema: "{symbol}_{tf}_{startts}_{endts}_{seed}.png"
