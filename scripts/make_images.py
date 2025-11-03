@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from PIL import Image, ImageFilter
 import yaml
 import os
+import gc
 
 # ---- Load configs ----
 def load_yaml(path: str) -> dict:
@@ -21,7 +22,7 @@ def load_yaml(path: str) -> dict:
 def _pick(val, rng: random.Random):
     if isinstance(val, list) and len(val) == 2 and all(isinstance(x, (int,float)) for x in val):
         a, b = val
-        return random.uniform(a, b)
+        return rng.uniform(a, b)
     if isinstance(val, list):
         return rng.choice(val) if hasattr(rng, "choice") else random.choice(val)
     return val
@@ -57,15 +58,15 @@ def render_window_png(
     dpi = render_cfg["canvas"]["dpi"]
     bg = render_cfg["canvas"]["bg_color"]
 
-    bull = _pick(render_cfg["chart"]["bull_color"])
-    bear = _pick(render_cfg["chart"]["bear_color"])
-    wick = int(round(_pick(render_cfg["chart"]["wick_thickness_px"])))
-    body = int(round(_pick(render_cfg["chart"]["body_thickness_px"])))
-    grid_on = _pick(render_cfg["chart"]["grid"]["enabled"])
+    bull = _pick(render_cfg["chart"]["bull_color"], rng)
+    bear = _pick(render_cfg["chart"]["bear_color"], rng)
+    wick = int(round(_pick(render_cfg["chart"]["wick_thickness_px"], rng)))
+    body = int(round(_pick(render_cfg["chart"]["body_thickness_px"], rng)))
+    grid_on = _pick(render_cfg["chart"]["grid"]["enabled"], rng)
     grid_alpha = render_cfg["chart"]["grid"]["alpha"] if grid_on else 0.0
-    font = _pick(render_cfg["axes"]["font_family"])
-    font_size = int(round(_pick(render_cfg["axes"]["font_size"])))
-    show_ticks = _pick(render_cfg["axes"]["show_ticks"])
+    font = _pick(render_cfg["axes"]["font_family"], rng)
+    font_size = int(round(_pick(render_cfg["axes"]["font_size"], rng)))
+    show_ticks = _pick(render_cfg["axes"]["show_ticks"], rng)
 
     # Configure matplotlib rc
     matplotlib.rcParams.update({
@@ -142,29 +143,6 @@ def render_window_png(
                         line.set_alpha(grid_alpha)
                 except Exception:
                     pass
-            # 3) If grid is on, adjust alpha *after* plotting to ensure it's applied
-            if grid_on:
-                for line in ax.get_xgridlines() + ax.get_ygridlines():
-                    line.set_alpha(grid_alpha)
-
-        # Ticks visibility
-        if not show_ticks:
-            ax.set_xticks([])
-            ax.set_yticks([])
-
-        # Limits for metadata
-        x_min, x_max = ax.get_xlim()
-        y_min, y_max = ax.get_ylim()
-        # Grid alpha across all axes (if any)
-        if grid_on:
-            axes_iter = axes if isinstance(axes, (list, tuple, np.ndarray)) else [axes]
-            for ax in axes_iter:
-                try:
-                    for line in ax.get_xgridlines() + ax.get_ygridlines():
-                        line.set_alpha(grid_alpha)
-                except Exception:
-                    pass
-
         # Save PNG
         out_png.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(out_png, bbox_inches="tight")
