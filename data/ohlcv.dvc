@@ -1,0 +1,6 @@
+outs:
+- md5: ceaece73708a8723b2c1491960ff468a.dir
+  size: 6355430
+  nfiles: 19
+  hash: md5
+  path: ohlcv
