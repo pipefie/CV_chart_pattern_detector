@@ -1,6 +1,6 @@
 outs:
-- md5: ceaece73708a8723b2c1491960ff468a.dir
-  size: 6355430
-  nfiles: 19
+- md5: 9c186795abccb09329c04b28755ce657.dir
+  size: 2627304
+  nfiles: 18
   hash: md5
   path: ohlcv
