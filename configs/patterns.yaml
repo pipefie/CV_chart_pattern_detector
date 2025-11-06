@@ -1,16 +1,32 @@
 meta:
+  schema_version: "1.0" 
   timeframe: "1h"
   comment: "Settings tuned for 1h bars on crypto & US large-caps; ATR-based thresholds sized for intraday noise."
+  inherit_rule: "deep_merge"
 
 common:
+  atr:
+    period: 14
+    source: "hlc3"       # "close" | "hl2" | "hlc3"
+    smoothing: "rma"     # "ema" | "sma" | "rma"
+  units:
+    # If a rule provides both *_atr and *_percent, which wins?
+    prefer_atr_over_percent: true
   pivots:
-    method: "prominence"
+    method: "prominence"          # ("prominence" | "savgol_peaks" | "swing_LR")
     use_atr_scaled: true           # treat thresholds in ATR units (intraday-friendly)
     min_prominence_atr: 0.7        # peaks/valleys must stand out ≥0.7×ATR
     min_distance_bars: 6           # avoid micro-zigzags
     smoothing_window_bars: 3
+    # Optional guards:
+    max_pivots_per_window: 40      # cap to prevent “hairy” series from exploding combinations
+    ignore_inside_gaps: true       # skip pivots across large price gaps
 
   lines:
+    fit: "ransac"                  # "ols" | "ransac"
+    ransac:
+      max_trials: 100
+      residual_threshold_pct_of_height: 0.02
     max_rmsd_pct_of_height: 0.35   # deviation from fitted line vs pattern height
     near_horizontal_max_deg: 12
     parallel_max_angle_diff_deg: 10
@@ -23,6 +39,29 @@ common:
   nms:
     iou_threshold: 0.35
     keep_top_k: 100
+
+  labels_post:                            # ⚡️
+    min_box_pixels: 18
+    dedup_time_overlap_bars: 10
+
+overrides:
+  # Matchers are simple globs on symbol; timeframe exact match
+  - match:
+      symbols: ["BTC-USD","ETH-USD"]
+      timeframe: "1h"
+    pivots:
+      min_prominence_atr: 0.9
+      min_distance_bars: 8
+    head_and_shoulders:
+      geometry:
+        head_above_shoulders_min_atr: 1.0
+  - match:
+      symbols: ["AAPL","NVDA","GOOGL","TSLA","AMZN","SPY","QQQ"]
+      timeframe: "1h"
+    double_top:
+      breakout:
+        confirm:
+          threshold_percent: 0.10
 
 patterns:
   # 1) Head & Shoulders family (2 classes)
@@ -47,6 +86,7 @@ patterns:
       confirm:
         type: "close_beyond_line"
         threshold_atr: 0.35         # close ≤ neckline − 0.35×ATR
+        threshold_percent: 0.12 
     invalidation:
       closes_back_above_neckline_within_bars: 10
       right_shoulder_exceeds_head_atr: 0.25
@@ -69,7 +109,8 @@ patterns:
       side: "up"
       confirm:
         type: "close_beyond_line"
-      # same 0.35 ATR in opposite direction
+        threshold_atr: 0.35       # same 0.35 ATR in opposite direction
+        threshold_percent: 0.12 
     trade_plan:
       stop:
         mode: "swing_point"
@@ -93,6 +134,7 @@ patterns:
       side: "down"
       confirm:
         type: "close_beyond_level"
+        threshold_atr: 0.35         # close ≤ neckline − 0.35×ATR
         threshold_percent: 0.12      # ~0.12% beyond neckline (large caps 1h)
     invalidation:
       second_peak_exceeds_first_pct: 0.6
@@ -146,6 +188,11 @@ patterns:
       target:
         mode: "measured_move"        # widest part height
 
+  ascending_triangle:                     # ⚡️ explicit disabled twins
+    enabled: false
+  symmetric_triangle:
+    enabled: false
+    
 labels:
   0: "head_and_shoulders"
   1: "inverse_head_and_shoulders"

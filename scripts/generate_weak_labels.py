@@ -1,0 +1,258 @@
+# scripts/generate_weak_labels.py
+from __future__ import annotations
+import argparse, json
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import yaml
+
+# ---------- Helpers ----------
+def load_yaml(p: Path) -> dict:
+    return yaml.safe_load(p.read_text(encoding="utf-8"))
+
+def load_meta(json_path: Path) -> dict:
+    return json.loads(json_path.read_text(encoding="utf-8"))
+
+def load_ohlcv(symbol: str) -> pd.DataFrame:
+    root = Path("data/ohlcv")
+    if (root / "equities_etf" / f"{symbol}.parquet").exists():
+        p = root / "equities_etf" / f"{symbol}.parquet"
+    else:
+        p = root / "crypto" / f"{symbol}.parquet"
+    df = pd.read_parquet(p)
+    df.index = df.index.tz_localize("UTC") if df.index.tz is None else df.index.tz_convert("UTC")
+    return df
+
+def slice_window(df: pd.DataFrame, start_iso: str, end_iso: str) -> pd.DataFrame:
+    s = pd.Timestamp(start_iso); e = pd.Timestamp(end_iso)
+    if s.tzinfo is None: s = s.tz_localize("UTC")
+    else: s = s.tz_convert("UTC")
+    if e.tzinfo is None: e = e.tz_localize("UTC")
+    else: e = e.tz_convert("UTC")
+    return df.loc[(df.index >= s) & (df.index <= e)]
+
+# Pixel mapping
+def bar_to_x(i: int, N: int, W: int) -> int:
+    if N <= 1: return (W - 1) // 2
+    return int(round((i / (N - 1)) * (W - 1)))
+
+def price_to_y(p: float, y_min: float, y_max: float, H: int) -> int:
+    y_rel = (p - y_min) / max(1e-9, (y_max - y_min))
+    return int(round((1.0 - y_rel) * (H - 1)))
+
+# YOLO box writer (normalized)
+def write_yolo(path: Path, boxes: list[tuple[int, float, float, float, float]]):
+    # boxes: [(class_id, cx, cy, w, h) ...] normalized [0..1]
+    with open(path, "w", encoding="utf-8") as f:
+        for cid, cx, cy, w, h in boxes:
+            f.write(f"{cid} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}\n")
+
+# ---------- Pivot detection ----------
+def pivots(series: np.ndarray, L: int, R: int, kind: str, min_sep: int) -> list[tuple[int, float]]:
+    """
+    kind in {'high','low'}. Return list of (i, value) pivot indices (0..N-1).
+    """
+    N = len(series)
+    idx = []
+    last_i = -10**9
+    for i in range(L, N - R):
+        window_left  = series[i - L: i]
+        window_right = series[i + 1: i + 1 + R]
+        v = series[i]
+        if kind == "high":
+            if v >= window_left.max() and v >= window_right.max():
+                if i - last_i >= min_sep:
+                    idx.append((i, float(v))); last_i = i
+        else:
+            if v <= window_left.min() and v <= window_right.min():
+                if i - last_i >= min_sep:
+                    idx.append((i, float(v))); last_i = i
+    return idx
+
+# ---------- Pattern rules (simple baselines) ----------
+def detect_double_top(closes: np.ndarray, piv_hi: list[tuple[int,float]], cfg: dict) -> list[dict]:
+    out = []
+    tol_rel  = cfg["peak_tolerance_rel"]
+    drop_rel = cfg["valley_drop_min_rel"]
+    min_span = cfg["min_span_bars"]; max_span = cfg["max_span_bars"]
+    for i1, p1 in piv_hi:
+        for i2, p2 in piv_hi:
+            if i2 <= i1 + 2: continue
+            span = i2 - i1
+            if span < min_span or span > max_span: continue
+            mid = (p1 + p2) * 0.5
+            if abs(p1 - p2) / max(1e-9, mid) > tol_rel: continue
+            # valley between
+            j0, j1 = i1 + 1, i2
+            if j1 <= j0 + 1: continue
+            valley = float(closes[j0:j1].min())
+            if (mid - valley) / max(1e-9, mid) < drop_rel: continue
+            out.append({"type":"double_top","i1":i1,"p1":p1,"i2":i2,"p2":p2,"ivalley":int(np.argmin(closes[j0:j1])+j0),"pvalley":valley})
+    return out
+
+def detect_double_bottom(closes: np.ndarray, piv_lo: list[tuple[int,float]], cfg: dict) -> list[dict]:
+    out = []
+    tol_rel  = cfg["trough_tolerance_rel"]
+    rise_rel = cfg["peak_rise_min_rel"]
+    min_span = cfg["min_span_bars"]; max_span = cfg["max_span_bars"]
+    for i1, p1 in piv_lo:
+        for i2, p2 in piv_lo:
+            if i2 <= i1 + 2: continue
+            span = i2 - i1
+            if span < min_span or span > max_span: continue
+            mid = (p1 + p2) * 0.5
+            if abs(p1 - p2) / max(1e-9, mid) > tol_rel: continue
+            # peak between
+            j0, j1 = i1 + 1, i2
+            if j1 <= j0 + 1: continue
+            peak = float(closes[j0:j1].max())
+            if (peak - mid) / max(1e-9, mid) < rise_rel: continue
+            out.append({"type":"double_bottom","i1":i1,"p1":p1,"i2":i2,"p2":p2,"ipeak":int(np.argmax(closes[j0:j1])+j0),"ppeak":peak})
+    return out
+
+def detect_head_shoulders(closes: np.ndarray, piv_hi: list[tuple[int,float]], cfg: dict) -> list[dict]:
+    out = []
+    min_rel = cfg["min_rel_height_head_vs_shoulders"]
+    sym_tol = cfg["shoulder_symmetry_tolerance_bars"]
+    min_span = cfg["min_span_bars"]; max_span = cfg["max_span_bars"]
+    for iL, pL in piv_hi:
+        for iH, pH in piv_hi:
+            if iH <= iL + 2: continue
+            for iR, pR in piv_hi:
+                if iR <= iH + 2: continue
+                span = iR - iL
+                if span < min_span or span > max_span: continue
+                # head higher than shoulders
+                sh_avg = 0.5*(pL+pR); rel = (pH - sh_avg)/max(1e-9, sh_avg)
+                if rel < min_rel: continue
+                # symmetry in bars
+                mid = 0.5*(iL + iH)
+                if abs(iR - mid) > sym_tol: continue
+                out.append({"type":"head_shoulders","iL":iL,"pL":pL,"iH":iH,"pH":pH,"iR":iR,"pR":pR})
+    return out
+
+# Simplified triangle: check upper/lower envelopes converge
+def detect_triangle(closes: np.ndarray, piv_hi: list[tuple[int,float]], piv_lo: list[tuple[int,float]], cfg: dict) -> list[dict]:
+    out = []
+    min_tu = cfg["min_touches_upper"]; min_tl = cfg["min_touches_lower"]
+    tol_rel = cfg["envelope_tol_rel"]; conv_min = cfg["convergence_min_rel"]
+    min_span = cfg["min_span_bars"]; max_span = cfg["max_span_bars"]
+    if len(piv_hi) < min_tu or len(piv_lo) < min_tl: return out
+    # crude upper/lower lines via linear fit of last K touches
+    for s in range(0, len(closes) - min_span):
+        e = min(len(closes)-1, s + max_span)
+        if e - s < min_span: continue
+        hi = [(i,p) for (i,p) in piv_hi if s <= i <= e]
+        lo = [(i,p) for (i,p) in piv_lo if s <= i <= e]
+        if len(hi) < min_tu or len(lo) < min_tl: continue
+        xi_hi = np.array([i for (i,_) in hi]); yi_hi = np.array([p for (_,p) in hi])
+        xi_lo = np.array([i for (i,_) in lo]); yi_lo = np.array([p for (_,p) in lo])
+        # fit y = a*i + b
+        a_hi, b_hi = np.polyfit(xi_hi, yi_hi, 1)
+        a_lo, b_lo = np.polyfit(xi_lo, yi_lo, 1)
+        # check convergence (gap shrinks)
+        gap_s = (a_hi*s + b_hi) - (a_lo*s + b_lo)
+        gap_e = (a_hi*e + b_hi) - (a_lo*e + b_lo)
+        mid = 0.5*((a_hi*s+b_hi) + (a_lo*s+b_lo))
+        if mid == 0: continue
+        if (gap_s - gap_e)/abs(mid) < conv_min: continue
+        # check touches within tolerance
+        ok_hi = np.mean(np.abs(yi_hi - (a_hi*xi_hi+b_hi))/np.maximum(1e-9, np.abs(yi_hi))) < tol_rel
+        ok_lo = np.mean(np.abs(yi_lo - (a_lo*xi_lo+b_lo))/np.maximum(1e-9, np.abs(yi_lo))) < tol_rel
+        if not (ok_hi and ok_lo): continue
+        out.append({"type":"triangle","start":s,"end":e,"a_hi":float(a_hi),"b_hi":float(b_hi),"a_lo":float(a_lo),"b_lo":float(b_lo)})
+    return out
+
+# ---------- Main labeling ----------
+CLASS_IDS = {"head_shoulders":0, "double_top":1, "double_bottom":2, "triangle":3}
+
+def main():
+    ap = argparse.ArgumentParser(description="Generate weak labels for rendered images using OHLCV rules.")
+    ap.add_argument("--patterns_cfg", default="configs/patterns.yaml")
+    ap.add_argument("--images_root", default="data/images/rendered")
+    ap.add_argument("--labels_root", default="data/labels/rendered")
+    ap.add_argument("--splits", nargs="+", default=["train","val","test"])
+    args = ap.parse_args()
+
+    cfg = load_yaml(Path(args.patterns_cfg))
+    labels_root = Path(args.labels_root); labels_root.mkdir(parents=True, exist_ok=True)
+
+    for split in args.splits:
+        img_dir = Path(args.images_root) / split
+        out_yolo = labels_root / split; out_json = labels_root / f"{split}_json"
+        out_yolo.mkdir(parents=True, exist_ok=True); out_json.mkdir(parents=True, exist_ok=True)
+
+        pngs = sorted(img_dir.glob("*.png"))
+        for png in pngs:
+            meta = load_meta(png.with_suffix(".json"))
+            symbol = meta["symbol"]; N = meta["bars"]; W = meta["img_w"]; H = meta["img_h"]
+            y_min, y_max = meta["axes_ylim"]
+            df_full = load_ohlcv(symbol)
+            win = slice_window(df_full, meta["start_ts"], meta["end_ts"])
+            if len(win) != N:
+                # if off-by-one due to timezone rounding etc., try to align by index length
+                win = win.iloc[-N:]
+
+            closes = win["close"].to_numpy()
+
+            # pivots
+            L = cfg["swing"]["lookback_left"]; R = cfg["swing"]["lookback_right"]; sep = cfg["swing"]["min_separation"]
+            piv_hi = pivots(closes, L, R, "high", sep)
+            piv_lo = pivots(closes, L, R, "low",  sep)
+
+            dets = []
+            dets += detect_head_shoulders(closes, piv_hi, cfg["head_shoulders"])
+            dets += detect_double_top(closes, piv_hi, cfg["double_top"])
+            dets += detect_double_bottom(closes, piv_lo, cfg["double_bottom"])
+            dets += detect_triangle(closes, piv_hi, piv_lo, cfg["triangle"])
+
+            yolo_boxes = []
+            rich = {"image": png.name, "detections": []}
+
+            for d in dets:
+                cls = d["type"]; cid = CLASS_IDS[cls]
+                # build pixel bbox from defining indices/prices:
+                xs, ys = [], []
+                if cls == "head_shoulders":
+                    for (i,p) in [(d["iL"],d["pL"]), (d["iH"],d["pH"]), (d["iR"],d["pR"])]:
+                        xs.append(bar_to_x(i, N, W)); ys.append(price_to_y(p, y_min, y_max, H))
+                elif cls == "double_top":
+                    for (i,p) in [(d["i1"],d["p1"]), (d["i2"],d["p2"]), (d["ivalley"],d["pvalley"])]:
+                        xs.append(bar_to_x(i, N, W)); ys.append(price_to_y(p, y_min, y_max, H))
+                elif cls == "double_bottom":
+                    for (i,p) in [(d["i1"],d["p1"]), (d["i2"],d["p2"]), (d["ipeak"],d["ppeak"])]:
+                        xs.append(bar_to_x(i, N, W)); ys.append(price_to_y(p, y_min, y_max, H))
+                elif cls == "triangle":
+                    # use whole segment s..e
+                    iL, iR = d["start"], d["end"]
+                    p_topL = d["a_hi"]*iL + d["b_hi"]; p_topR = d["a_hi"]*iR + d["b_hi"]
+                    p_botL = d["a_lo"]*iL + d["b_lo"]; p_botR = d["a_lo"]*iR + d["b_lo"]
+                    for (i,p) in [(iL,p_topL),(iR,p_topR),(iL,p_botL),(iR,p_botR)]:
+                        xs.append(bar_to_x(i, N, W)); ys.append(price_to_y(p, y_min, y_max, H))
+
+                xmin, xmax = max(0, min(xs)), min(W-1, max(xs))
+                ymin, ymax = max(0, min(ys)), min(H-1, max(ys))
+
+                # padding in pixels (from cfg)
+                pad = cfg[cls].get("bbox_padding_px", 4)
+                xmin = max(0, xmin - pad); xmax = min(W-1, xmax + pad)
+                ymin = max(0, ymin - pad); ymax = min(H-1, ymax + pad)
+
+                # YOLO normalized cx,cy,w,h
+                cx = (xmin + xmax) / 2 / W
+                cy = (ymin + ymax) / 2 / H
+                bw = (xmax - xmin) / W
+                bh = (ymax - ymin) / H
+                yolo_boxes.append((cid, cx, cy, bw, bh))
+
+                rich["detections"].append({"class": cls, "bbox_px": [int(xmin),int(ymin),int(xmax),int(ymax)], "raw": d})
+
+            # write yolo + rich json
+            if yolo_boxes:
+                write_yolo(out_yolo / (png.stem + ".txt"), yolo_boxes)
+                (out_json / (png.stem + ".json")).write_text(json.dumps(rich, indent=2), encoding="utf-8")
+
+        print(f"✅ Split {split}: labels -> {out_yolo}")
+
+if __name__ == "__main__":
+    main()
