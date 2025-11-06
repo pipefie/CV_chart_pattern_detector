@@ -31,10 +31,10 @@ execution:
   gap_handling: "worse_price"
 
 walk_forward:
-  train_start: "2019-01-01"
-  train_end:   "2022-12-31"
-  validate_end: "2023-12-31"
-  test_end:    "2025-06-30"
+  train_start: "2023-11-10"
+  train_end:   "2025-03-31"
+  validate_end: "2025-08-15"
+  test_end:    "2025-10-31"
   roll_years: 1
 
 report:
