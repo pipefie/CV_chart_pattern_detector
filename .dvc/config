@@ -1,2 +1,4 @@
 [core]
-    remote = local-remote
+    remote = gdrv
+['remote "gdrv"']
+    url = gdrive://1s55PRG-RLYJXDOWNSVwOeVKVeEL2GFwy
