@@ -1,7 +1,12 @@
 from __future__ import annotations
+import sys
+from pathlib import Path
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import argparse
 from datetime import datetime
-from pathlib import Path
 from src.utils.run_manifest import write_render_manifest
 
 def main():
