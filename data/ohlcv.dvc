@@ -1,6 +1,6 @@
 outs:
-- md5: 9c186795abccb09329c04b28755ce657.dir
-  size: 2627304
+- md5: 69be790a42d800d234a8bd4777c28f39.dir
+  size: 2639764
   nfiles: 18
   hash: md5
   path: ohlcv
