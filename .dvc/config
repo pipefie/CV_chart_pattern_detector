@@ -2,5 +2,3 @@
     remote = gdrv
 ['remote "gdrv"']
     url = gdrive://1s55PRG-RLYJXDOWNSVwOeVKVeEL2GFwy
-    gdrive_use_service_account = true
-    gdrive_service_account_json_file_path = C:/Users/afierro/CV_chart_pattern_detector/dvc-storage-477909-410c420a9907.json
