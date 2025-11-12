@@ -1,0 +1,35 @@
+# configs/features.yaml
+meta:
+  comment: "Feature toggles and parameters"
+
+features:
+  # OHLCV-derived (recommended: keep all true)
+  ohlcv_stats: true
+  candle_shape: true
+  swings: true
+  pattern_proxies: true
+
+  # Image-derived (optional; requires opencv-python)
+  image_edges_hough: true
+
+params:
+  # ATR + moving averages
+  atr_period: 14
+  ma_periods: [10, 20, 50]
+  roc_periods: [5, 10, 20]
+
+  # Pivot detector (same spirit as generate_weak_labels)
+  pivot_left: 3
+  pivot_right: 3
+  pivot_min_sep: 4
+
+  # Image processing
+  canny_low: 50
+  canny_high: 150
+  hough_rho: 1
+  hough_theta_deg: 1
+  hough_thresh: 60
+  top_hough_lines: 4         # how many lines to keep (slopes + residuals)
+
+  # Triangle “line-ness”: distance threshold in pixels from line
+  line_dist_px: 3

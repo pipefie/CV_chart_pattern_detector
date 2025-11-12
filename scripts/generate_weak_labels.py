@@ -2,9 +2,15 @@
 from __future__ import annotations
 import argparse, json
 from pathlib import Path
+from copy import deepcopy
+from fnmatch import fnmatch
 import numpy as np
 import pandas as pd
 import yaml
+from scipy.signal import find_peaks
+import math
+import cv2 as cv
+
 
 # ---------- Helpers ----------
 def load_yaml(p: Path) -> dict:
@@ -31,7 +37,71 @@ def slice_window(df: pd.DataFrame, start_iso: str, end_iso: str) -> pd.DataFrame
     else: e = e.tz_convert("UTC")
     return df.loc[(df.index >= s) & (df.index <= e)]
 
-# Pixel mapping
+def _smooth_series(values: np.ndarray, window: int) -> np.ndarray:
+    if window <= 1:
+        return values
+    kernel = np.ones(window, dtype=float) / float(window)
+    return np.convolve(values, kernel, mode="same")
+
+def deep_merge_dict(base: dict | None, override: dict | None) -> dict:
+    if base is None:
+        base = {}
+    if override is None:
+        return deepcopy(base)
+    result = deepcopy(base)
+    for k, v in override.items():
+        if isinstance(v, dict) and isinstance(result.get(k), dict):
+            result[k] = deep_merge_dict(result[k], v)
+        else:
+            result[k] = deepcopy(v)
+    return result
+
+def override_matches(match_cfg: dict | None, symbol: str, timeframe: str) -> bool:
+    if not match_cfg:
+        return False
+    tf = match_cfg.get("timeframe")
+    if tf and tf != timeframe:
+        return False
+    symbols = match_cfg.get("symbols")
+    if symbols:
+        if not any(fnmatch(symbol, pat) for pat in symbols):
+            return False
+    return True
+
+COMMON_SECTION_KEYS = {
+    "atr",
+    "units",
+    "pivots",
+    "lines",
+    "windows",
+    "nms",
+    "labels_post",
+}
+
+def resolve_config(common_base: dict,
+                   patterns_base: dict,
+                   overrides: list[dict],
+                   symbol: str,
+                   timeframe: str,
+                   pattern_keys: set[str]) -> tuple[dict, dict]:
+    common = deepcopy(common_base or {})
+    patterns = deepcopy(patterns_base or {})
+    for ov in overrides or []:
+        if not override_matches(ov.get("match"), symbol, timeframe):
+            continue
+        for key, val in ov.items():
+            if key == "match":
+                continue
+            if key in pattern_keys:
+                patterns[key] = deep_merge_dict(patterns.get(key, {}), val)
+            elif key in COMMON_SECTION_KEYS or key in (common_base or {}):
+                common[key] = deep_merge_dict(common.get(key, {}), val)
+            else:
+                # fall back to treating unknown keys as common tweaks
+                common[key] = deep_merge_dict(common.get(key, {}), val)
+    return common, patterns
+
+# Pixel mapping (used for YOLO bboxes)
 def bar_to_x(i: int, N: int, W: int) -> int:
     if N <= 1: return (W - 1) // 2
     return int(round((i / (N - 1)) * (W - 1)))
@@ -40,95 +110,332 @@ def price_to_y(p: float, y_min: float, y_max: float, H: int) -> int:
     y_rel = (p - y_min) / max(1e-9, (y_max - y_min))
     return int(round((1.0 - y_rel) * (H - 1)))
 
-# YOLO writer
 def write_yolo(path: Path, boxes: list[tuple[int, float, float, float, float]]):
     with open(path, "w", encoding="utf-8") as f:
         for cid, cx, cy, w, h in boxes:
             f.write(f"{cid} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}\n")
 
-# ---------- Pivot detection ----------
-def pivots(series: np.ndarray, L: int, R: int, kind: str, min_sep: int) -> list[tuple[int, float]]:
-    N = len(series)
-    idx = []
-    last_i = -10**9
-    for i in range(L, N - R):
-        window_left  = series[i - L: i]
-        window_right = series[i + 1: i + 1 + R]
-        v = series[i]
-        if kind == "high":
-            if v >= window_left.max() and v >= window_right.max():
-                if i - last_i >= min_sep:
-                    idx.append((i, float(v))); last_i = i
+# --- ATR & smoothing ---
+def compute_atr(high, low, close, period=14, mode="rma"):
+    # TR
+    prev_close = np.r_[close[0], close[:-1]]
+    tr = np.maximum(high - low, np.maximum(np.abs(high - prev_close), np.abs(low - prev_close)))
+    # smoothing
+    if mode == "rma":
+        alpha = 1.0 / period
+        out = np.empty_like(tr, dtype=float)
+        out[0] = tr[0]
+        for i in range(1, len(tr)):
+            out[i] = alpha * tr[i] + (1 - alpha) * out[i-1]
+        return out
+    elif mode == "ema":
+        alpha = 2.0 / (period + 1)
+        out = np.empty_like(tr, dtype=float)
+        out[0] = tr[0]
+        for i in range(1, len(tr)):
+            out[i] = alpha * tr[i] + (1 - alpha) * out[i-1]
+        return out
+    else:  # sma
+        k = int(period)
+        if k <= 1: return tr
+        return np.convolve(tr, np.ones(k, dtype=float)/k, mode="same")
+
+# --- Pivot extraction via scipy.signal.find_peaks with ATR-scaled prominence ---
+def extract_pivots_with_prominence(close: np.ndarray,
+                                   min_prom_atr: float,
+                                   min_dist_bars: int,
+                                   atr: np.ndarray,
+                                   highs: bool = True,
+                                   max_pivots: int | None = None,
+                                   smooth_window: int = 1) -> list[tuple[int, float]]:
+    """find_peaks on close (for highs) or on -close (for lows), with prominence in ATR units."""
+    # convert ATR-threshold to data units (≈ average ATR over window)
+    atr_mean = float(np.nanmean(atr)) if atr is not None and len(atr) else 0.0
+    prom_abs = max(1e-9, min_prom_atr * atr_mean)
+
+    series = close if highs else (-close)
+    series = _smooth_series(series, smooth_window)
+    peaks, props = find_peaks(series, prominence=prom_abs, distance=max(1, int(min_dist_bars)))
+    if max_pivots and len(peaks) > max_pivots:
+        prominences = props.get("prominences")
+        if prominences is not None and len(prominences) == len(peaks):
+            order = np.argsort(prominences)[::-1]
         else:
-            if v <= window_left.min() and v <= window_right.min():
-                if i - last_i >= min_sep:
-                    idx.append((i, float(v))); last_i = i
-    return idx
+            order = np.argsort(series[peaks])[::-1]
+        keep = np.sort(peaks[order[:max_pivots]])
+        peaks = keep
+    piv = []
+    for idx in sorted(peaks):
+        price = close[idx]  # note: for lows we used -close to find 'peaks', but keep true price
+        piv.append((int(idx), float(price)))
+    return piv
 
-# ---------- Pattern rules (baseline) ----------
-def detect_double_top(closes: np.ndarray, piv_hi: list[tuple[int,float]], cfg: dict) -> list[dict]:
+# --- Threshold chooser (ATR or %) ---
+def _choose_abs_threshold(value_atr, value_pct, atr_mean, mid_price, prefer_atr=True) -> float:
+    if prefer_atr and value_atr is not None:
+        return float(value_atr) * atr_mean
+    if value_pct is not None:
+        return float(value_pct) * max(1e-9, mid_price)
+    return 0.003 * max(1e-9, mid_price)  # tiny fallback
+
+# --- Breakout confirmation relative to a level ---
+def _level_breakout_confirm(close_future: np.ndarray, level: float, side: str, thr_abs: float, within_bars: int | None) -> bool:
+    rng = range(0, min(len(close_future), within_bars)) if within_bars else range(0, len(close_future))
+    if side == "down":
+        return any(close_future[k] <= level - thr_abs for k in rng)
+    else:
+        return any(close_future[k] >= level + thr_abs for k in rng)
+
+def _nms_time(dets: list[dict], dedup_bars: int) -> list[dict]:
+    """Simple 1D NMS over time: keep best score, drop overlapping (|i_center diff| < dedup_bars)."""
+    dets = sorted(dets, key=lambda d: -d.get("score", 0.0))
+    kept = []
+    centers = []
+    for d in dets:
+        ic = d.get("icenter", None)
+        if ic is None:
+            kept.append(d); continue
+        if any(abs(ic - kc) < dedup_bars for kc in centers):
+            continue
+        centers.append(ic)
+        kept.append(d)
+    return kept
+
+# --- Robust Double Top ---
+def detect_double_top(close: np.ndarray,
+                      piv_hi: list[tuple[int,float]],
+                      cfg_dt: dict,
+                      atr_mean: float,
+                      prefer_atr: bool,
+                      labels_post: dict | None = None) -> list[dict]:
     out = []
-    tol_rel  = cfg["peak_tolerance_rel"]
-    drop_rel = cfg["valley_drop_min_rel"]
-    min_span = cfg["min_span_bars"]; max_span = cfg["max_span_bars"]
-    for i1, p1 in piv_hi:
-        for i2, p2 in piv_hi:
-            if i2 <= i1 + 2: continue
+    geom = (cfg_dt.get("geometry") or {})
+    dur  = geom.get("duration", {})
+    min_span = int(dur.get("min_bars", 16)); max_span = int(dur.get("max_bars", 120))
+    sim_tol  = float(geom.get("peak_height_similarity_pct", 15)) / 100.0
+    valley_sep = int(geom.get("valley_min_bars_from_peaks", 2))
+    max_pairs = max(1, int(geom.get("max_pairs_per_peak", 5)))
+
+    br = (cfg_dt.get("breakout") or {})
+    br_side = br.get("side", "down")
+    brc = (br.get("confirm") or {})
+    br_thr_atr = brc.get("threshold_atr", None)
+    br_thr_pct = brc.get("threshold_percent", None)
+    br_within  = brc.get("within_bars", None)
+
+    sc = (cfg_dt.get("scoring") or {})
+    w_depth = float(sc.get("weight_valley_depth_atr", 1.0))
+    w_span  = float(sc.get("weight_span", 0.2))
+
+    piv_sorted = sorted(piv_hi, key=lambda t: t[0])
+    total = len(piv_sorted)
+    for idx1, (i1, p1) in enumerate(piv_sorted):
+        limit = min(total, idx1 + 1 + max_pairs)
+        for idx2 in range(idx1 + 1, limit):
+            i2, p2 = piv_sorted[idx2]
+            if i2 <= i1 + valley_sep:
+                continue
             span = i2 - i1
             if span < min_span or span > max_span: continue
-            mid = (p1 + p2) * 0.5
-            if abs(p1 - p2) / max(1e-9, mid) > tol_rel: continue
-            j0, j1 = i1 + 1, i2
-            if j1 <= j0 + 1: continue
-            valley = float(closes[j0:j1].min())
-            if (mid - valley) / max(1e-9, mid) < drop_rel: continue
-            out.append({"type":"double_top","i1":i1,"p1":p1,"i2":i2,"p2":p2,"ivalley":int(np.argmin(closes[j0:j1])+j0),"pvalley":valley})
-    return out
+            mid = 0.5*(p1+p2)
+            if abs(p1 - p2)/max(1e-9, mid) > sim_tol:
+                continue
+            j0, j1 = i1 + valley_sep, i2 - valley_sep
+            if j1 <= j0: continue
+            local = close[j0:j1]
+            if len(local) == 0:
+                continue
+            v_idx = int(np.argmin(local) + j0)
+            v = float(close[v_idx])
 
-def detect_double_bottom(closes: np.ndarray, piv_lo: list[tuple[int,float]], cfg: dict) -> list[dict]:
+            need_abs = _choose_abs_threshold(
+                geom.get("valley_drop_min_atr"),
+                geom.get("valley_drop_min_pct"),
+                atr_mean, mid, prefer_atr
+            )
+            if (mid - v) < need_abs:
+                continue
+
+            if brc:
+                thr_abs = _choose_abs_threshold(br_thr_atr, br_thr_pct, atr_mean, mid, prefer_atr)
+                if br_within:
+                    future = close[i2+1 : i2+1 + br_within]
+                else:
+                    future = close[i2+1 :]
+                if len(future) == 0:
+                    continue
+                if not _level_breakout_confirm(future, level=v, side=br_side, thr_abs=thr_abs, within_bars=br_within):
+                    continue
+
+            ic = int(0.5*(i1+i2))
+            depth = (mid - v)/max(1e-9, atr_mean)
+            span_score = span / max(1.0, float(max_span))
+            score = w_depth * depth + w_span * span_score
+            out.append({"type":"double_top","i1":i1,"p1":p1,"i2":i2,"p2":p2,
+                        "ivalley":v_idx,"pvalley":v,"span":span,"score":float(score),"icenter":ic})
+    dedup = int((labels_post or {}).get("dedup_time_overlap_bars", 10))
+    return _nms_time(out, dedup)
+
+# --- Robust Double Bottom ---
+def detect_double_bottom(close: np.ndarray,
+                         piv_lo: list[tuple[int,float]],
+                         cfg_db: dict,
+                         atr_mean: float,
+                         prefer_atr: bool,
+                         labels_post: dict | None = None) -> list[dict]:
     out = []
-    tol_rel  = cfg["trough_tolerance_rel"]
-    rise_rel = cfg["peak_rise_min_rel"]
-    min_span = cfg["min_span_bars"]; max_span = cfg["max_span_bars"]
-    for i1, p1 in piv_lo:
-        for i2, p2 in piv_lo:
-            if i2 <= i1 + 2: continue
+    geom = (cfg_db.get("geometry") or {})
+    dur  = geom.get("duration", {})
+    min_span = int(dur.get("min_bars", 16)); max_span = int(dur.get("max_bars", 120))
+    sim_tol  = float(geom.get("peak_height_similarity_pct", 15)) / 100.0
+    peak_sep = int(geom.get("valley_min_bars_from_peaks", 2))  # reuse name symmetrically
+    max_pairs = max(1, int(geom.get("max_pairs_per_peak", 5)))
+
+    br = (cfg_db.get("breakout") or {})
+    br_side = br.get("side", "up")
+    brc = (br.get("confirm") or {})
+    br_thr_atr = brc.get("threshold_atr", None)
+    br_thr_pct = brc.get("threshold_percent", None)
+    br_within  = brc.get("within_bars", None)
+
+    sc = (cfg_db.get("scoring") or {})
+    w_rise = float(sc.get("weight_valley_depth_atr", 1.0))
+    w_span = float(sc.get("weight_span", 0.2))
+
+    piv_sorted = sorted(piv_lo, key=lambda t: t[0])
+    total = len(piv_sorted)
+    for idx1, (i1, p1) in enumerate(piv_sorted):
+        limit = min(total, idx1 + 1 + max_pairs)
+        for idx2 in range(idx1 + 1, limit):
+            i2, p2 = piv_sorted[idx2]
+            if i2 <= i1 + peak_sep:
+                continue
             span = i2 - i1
             if span < min_span or span > max_span: continue
-            mid = (p1 + p2) * 0.5
-            if abs(p1 - p2) / max(1e-9, mid) > tol_rel: continue
-            j0, j1 = i1 + 1, i2
-            if j1 <= j0 + 1: continue
-            peak = float(closes[j0:j1].max())
-            if (peak - mid) / max(1e-9, mid) < rise_rel: continue
-            out.append({"type":"double_bottom","i1":i1,"p1":p1,"i2":i2,"p2":p2,"ipeak":int(np.argmax(closes[j0:j1])+j0),"ppeak":peak})
-    return out
+            mid = 0.5*(p1+p2)
+            if abs(p1 - p2)/max(1e-9, mid) > sim_tol:
+                continue
+            j0, j1 = i1 + peak_sep, i2 - peak_sep
+            if j1 <= j0: continue
+            local = close[j0:j1]
+            if len(local) == 0:
+                continue
+            peak_idx = int(np.argmax(local) + j0)
+            pk = float(close[peak_idx])
 
-def detect_head_shoulders(closes: np.ndarray, piv_hi: list[tuple[int,float]], cfg: dict) -> list[dict]:
+            need_abs = _choose_abs_threshold(
+                geom.get("peak_rise_min_atr"),
+                geom.get("peak_rise_min_pct"),
+                atr_mean, mid, prefer_atr
+            )
+            if (pk - mid) < need_abs:
+                continue
+
+            if brc:
+                thr_abs = _choose_abs_threshold(br_thr_atr, br_thr_pct, atr_mean, mid, prefer_atr)
+                if br_within:
+                    future = close[i2+1 : i2+1 + br_within]
+                else:
+                    future = close[i2+1 :]
+                if len(future) == 0:
+                    continue
+                if not _level_breakout_confirm(future, level=pk, side=br_side, thr_abs=thr_abs, within_bars=br_within):
+                    continue
+
+            ic = int(0.5*(i1+i2))
+            rise = (pk - mid)/max(1e-9, atr_mean)
+            span_score = span / max(1.0, float(max_span))
+            score = w_rise * rise + w_span * span_score
+            out.append({"type":"double_bottom","i1":i1,"p1":p1,"i2":i2,"p2":p2,
+                        "ipeak":peak_idx,"ppeak":pk,"span":span,"score":float(score),"icenter":ic})
+    dedup = int((labels_post or {}).get("dedup_time_overlap_bars", 10))
+    return _nms_time(out, dedup)
+
+def detect_head_shoulders(closes: np.ndarray,
+                          piv_hi: list[tuple[int,float]],
+                          cfg: dict,
+                          atr_mean: float,
+                          prefer_atr: bool) -> list[dict]:
+    """Classic H&S: three highs with middle > shoulders + rough time symmetry."""
     out = []
-    min_rel = cfg["min_rel_height_head_vs_shoulders"]
-    sym_tol = cfg["shoulder_symmetry_tolerance_bars"]
-    min_span = cfg["min_span_bars"]; max_span = cfg["max_span_bars"]
-    for iL, pL in piv_hi:
-        for iH, pH in piv_hi:
+    geom = cfg.get("geometry", {})
+    sym_pct = float(geom.get("shoulder_timing_similarity_pct", 40)) / 100.0
+    dur     = geom.get("duration", {})
+    min_span = int(dur.get("min_bars", 20)); max_span = int(dur.get("max_bars", 120))
+    shoulder_sim = float(geom.get("shoulder_height_similarity_pct", 25)) / 100.0
+    piv_sorted = sorted(piv_hi, key=lambda t: t[0])
+    for iL, pL in piv_sorted:
+        for iH, pH in piv_sorted:
             if iH <= iL + 2: continue
-            for iR, pR in piv_hi:
+            for iR, pR in piv_sorted:
                 if iR <= iH + 2: continue
                 span = iR - iL
                 if span < min_span or span > max_span: continue
                 sh_avg = 0.5*(pL+pR)
-                rel = (pH - sh_avg)/max(1e-9, sh_avg)
-                if rel < min_rel: continue
-                mid = 0.5*(iL + iH)
-                if abs(iR - mid) > sym_tol: continue
+                if abs(pL - pR)/max(1e-9, sh_avg) > shoulder_sim:
+                    continue
+                head_need = _choose_abs_threshold(
+                    geom.get("head_above_shoulders_min_atr"),
+                    geom.get("head_above_shoulders_min_pct"),
+                    atr_mean,
+                    sh_avg,
+                    prefer_atr
+                )
+                if (pH - sh_avg) < max(head_need, 0.01 * sh_avg):
+                    continue
+                ideal = 0.5*(iL+iH)
+                tol_bars = max(1, int(sym_pct * span))
+                if abs(iR - ideal) > tol_bars: continue
                 out.append({"type":"head_shoulders","iL":iL,"pL":pL,"iH":iH,"pH":pH,"iR":iR,"pR":pR})
     return out
 
-def detect_triangle(closes: np.ndarray, piv_hi: list[tuple[int,float]], piv_lo: list[tuple[int,float]], cfg: dict) -> list[dict]:
+def detect_inverse_head_shoulders(closes: np.ndarray,
+                                  piv_lo: list[tuple[int,float]],
+                                  cfg: dict,
+                                  atr_mean: float,
+                                  prefer_atr: bool) -> list[dict]:
+    """Inverse H&S: three lows with middle (head) lower than shoulders + rough time symmetry."""
     out = []
-    min_tu = cfg["min_touches_upper"]; min_tl = cfg["min_touches_lower"]
-    tol_rel = cfg["envelope_tol_rel"]; conv_min = cfg["convergence_min_rel"]
-    min_span = cfg["min_span_bars"]; max_span = cfg["max_span_bars"]
+    geom = cfg.get("geometry", {})
+    sym_pct = float(geom.get("shoulder_timing_similarity_pct", 40)) / 100.0
+    dur     = geom.get("duration", {})
+    min_span = int(dur.get("min_bars", 20)); max_span = int(dur.get("max_bars", 120))
+    shoulder_sim = float(geom.get("shoulder_height_similarity_pct", 25)) / 100.0
+    piv_sorted = sorted(piv_lo, key=lambda t: t[0])
+    for iL, pL in piv_sorted:
+        for iH, pH in piv_sorted:
+            if iH <= iL + 2: continue
+            for iR, pR in piv_sorted:
+                if iR <= iH + 2: continue
+                span = iR - iL
+                if span < min_span or span > max_span: continue
+                sh_avg = 0.5*(pL+pR)
+                if abs(pL - pR)/max(1e-9, sh_avg) > shoulder_sim:
+                    continue
+                head_need = _choose_abs_threshold(
+                    geom.get("head_above_shoulders_min_atr"),
+                    geom.get("head_above_shoulders_min_pct"),
+                    atr_mean,
+                    sh_avg,
+                    prefer_atr
+                )
+                if (sh_avg - pH) < max(head_need, 0.01 * sh_avg):
+                    continue
+                ideal = 0.5*(iL+iH)
+                tol_bars = max(1, int(sym_pct * span))
+                if abs(iR - ideal) > tol_bars: continue
+                out.append({"type":"inverse_head_shoulders","iL":iL,"pL":pL,"iH":iH,"pH":pH,"iR":iR,"pR":pR})
+    return out
+
+def detect_triangle(closes: np.ndarray, piv_hi: list[tuple[int,float]], piv_lo: list[tuple[int,float]], cfg_geom: dict) -> list[dict]:
+    """Generic converging upper/lower envelopes."""
+    out = []
+    min_tu = int(cfg_geom.get("upper_trendline", {}).get("min_touches", 3))
+    min_tl = int(cfg_geom.get("lower_boundary", {}).get("min_touches", 3))
+    tol_rel = float(cfg_geom.get("envelope_tol_rel", 0.004))
+    conv_min = float(cfg_geom.get("convergence_min_rel", 0.01))
+    dur = cfg_geom.get("duration", {})
+    min_span = int(dur.get("min_bars", 30)); max_span = int(dur.get("max_bars", 160))
     if len(piv_hi) < min_tu or len(piv_lo) < min_tl: return out
     for s in range(0, len(closes) - min_span):
         e = min(len(closes)-1, s + max_span)
@@ -151,112 +458,274 @@ def detect_triangle(closes: np.ndarray, piv_hi: list[tuple[int,float]], piv_lo: 
         out.append({"type":"triangle","start":s,"end":e,"a_hi":float(a_hi),"b_hi":float(b_hi),"a_lo":float(a_lo),"b_lo":float(b_lo)})
     return out
 
-# ---------- Main ----------
-CLASS_IDS = {"head_shoulders":0, "double_top":1, "double_bottom":2, "triangle":3}
+def is_descending_triangle(det: dict, closes: np.ndarray, flat_tol_rel: float = 0.002) -> bool:
+    """Upper slope negative, lower nearly flat (normalized by mid-price)."""
+    a_hi = det["a_hi"]; a_lo = det["a_lo"]
+    s = det["start"]; e = det["end"]; mid = float(closes[s:e+1].mean())
+    if mid == 0: return False
+    cond_upper_down = (a_hi < 0.0)
+    cond_lower_flat = abs(a_lo)/abs(mid) < flat_tol_rel
+    return cond_upper_down and cond_lower_flat
 
+# --- Triangle Hough gate (image-based confirmation for descending triangle) ---
+def _deg_from_rise_run(dy: float, dx: float) -> float:
+    if dx == 0: return 90.0 * (1 if dy > 0 else -1)
+    return math.degrees(math.atan2(dy, dx))
+
+def hough_desc_triangle_ok(png_path: Path, tri_cfg: dict) -> bool:
+    hc = (tri_cfg.get("hough") or {})
+    if not hc.get("enabled", True):
+        return True
+    can = hc.get("canny", {}) or {}
+    hp  = hc.get("houghp", {}) or {}
+    blur_ksize = int(can.get("blur_ksize", 3))
+    t1, t2 = int(can.get("t1", 50)), int(can.get("t2", 150))
+
+    rho = float(hp.get("rho", 1.0))
+    theta = math.radians(float(hp.get("theta_deg", 1.0)))
+    thresh = int(hp.get("thresh", 45))
+    min_len = int(hp.get("min_line_len", 40))
+    max_gap = int(hp.get("max_line_gap", 10))
+
+    im = cv.imread(str(png_path), cv.IMREAD_GRAYSCALE)
+    if im is None: 
+        return False
+    if blur_ksize >= 3:
+        im = cv.GaussianBlur(im, (blur_ksize, blur_ksize), 0)
+    edges = cv.Canny(im, t1, t2)
+
+    lines = cv.HoughLinesP(edges, rho, theta, threshold=thresh, minLineLength=min_len, maxLineGap=max_gap)
+    if lines is None or len(lines) == 0:
+        return False
+
+    # classify lines by slope (deg)
+    upper_max_deg = float(hc.get("upper_max_deg", -5.0))            # should be <= this (negative)
+    lower_abs_max = float(hc.get("lower_abs_max_deg", 4.0))         # near-flat
+    min_support   = int(hc.get("min_support_lines", 3))
+
+    uppers, lowers = 0, 0
+    for ln in lines[:,0,:]:
+        x1,y1,x2,y2 = ln
+        dx, dy = (x2-x1), (y2-y1)
+        deg = _deg_from_rise_run(-dy, dx)  # image y-down => invert dy for math up
+        if deg <= upper_max_deg:
+            uppers += 1
+        if abs(deg) <= lower_abs_max:
+            lowers += 1
+
+    return (uppers >= min_support) and (lowers >= min_support)
+# ---------- Main ----------
 def main():
     ap = argparse.ArgumentParser(description="Generate weak labels (YOLO + CSV presence flags) for rendered images.")
     ap.add_argument("--patterns_cfg", default="configs/patterns.yaml")
     ap.add_argument("--images_root", default="data/images/rendered")
     ap.add_argument("--labels_root", default="data/labels/rendered")
-    ap.add_argument("--labels_csv", default="reports/labels/weak_labels.csv",
-                    help="CSV with one row per image: presence flags and metadata")
+    ap.add_argument("--labels_csv", default="reports/labels/weak_labels.csv")
     ap.add_argument("--splits", nargs="+", default=["train","val","test"])
     args = ap.parse_args()
 
-    cfg = load_yaml(Path(args.patterns_cfg))
-    labels_root = Path(args.labels_root); labels_root.mkdir(parents=True, exist_ok=True)
+    cfg = load_yaml(Path(args.patterns_cfg)) or {}
+    common_base = cfg.get("common", {}) or {}
+    patterns_base = cfg.get("patterns", {}) or {}
+    overrides = cfg.get("overrides", []) or []
+    labels_map = cfg.get("labels", {}) or {}
 
-    # accumulate CSV rows here
+    supported = {
+        "head_and_shoulders",
+        "inverse_head_and_shoulders",
+        "double_top",
+        "double_bottom",
+        "descending_triangle",
+    }
+    pattern_keys = set(patterns_base.keys()).union(supported)
+    default_active = sorted([name for name in supported if patterns_base.get(name, {}).get("enabled", True)])
+    if not default_active:
+        print("⚠️ Base config has no supported patterns enabled; relying on overrides.")
+
+    cfg_cache: dict[tuple[str,str], tuple[dict, dict, list[str]]] = {}
     rows = []
 
     for split in args.splits:
         img_dir = Path(args.images_root) / split
-        out_yolo = labels_root / split; out_json = labels_root / f"{split}_json"
-        out_yolo.mkdir(parents=True, exist_ok=True); out_json.mkdir(parents=True, exist_ok=True)
+        out_yolo = Path(args.labels_root) / split
+        out_json = Path(args.labels_root) / f"{split}_json"
+        out_yolo.mkdir(parents=True, exist_ok=True)
+        out_json.mkdir(parents=True, exist_ok=True)
 
         pngs = sorted(img_dir.glob("*.png"))
         for png in pngs:
+            # --- load metadata + OHLCV window ---
             meta = load_meta(png.with_suffix(".json"))
             symbol = meta["symbol"]
             N = meta["bars"]; W = meta["img_w"]; H = meta["img_h"]
             y_min, y_max = meta["axes_ylim"]
-            timeframe = meta.get("timeframe", "")  # stored by your renderer
+            timeframe = meta.get("timeframe", "")
+
+            cache_key = (symbol, timeframe)
+            if cache_key not in cfg_cache:
+                eff_common, eff_patterns = resolve_config(common_base, patterns_base, overrides, symbol, timeframe, pattern_keys)
+                eff_active = sorted([name for name in supported if eff_patterns.get(name, {}).get("enabled", True)])
+                cfg_cache[cache_key] = (eff_common, eff_patterns, eff_active)
+            eff_common, eff_patterns, active = cfg_cache[cache_key]
+            if not active:
+                continue
+
+            atr_cfg   = eff_common.get("atr", {}) or {}
+            piv_cfg   = eff_common.get("pivots", {}) or {}
+            units_cfg = eff_common.get("units", {}) or {}
+            labels_post = eff_common.get("labels_post", {}) or {}
+            prefer_atr = bool(units_cfg.get("prefer_atr_over_percent", True))
+
+            atr_period   = int(atr_cfg.get("period", 14))
+            atr_smoothing = atr_cfg.get("smoothing", "rma")
+            min_prom_atr = float(piv_cfg.get("min_prominence_atr", 0.7))
+            min_dist_bars = int(piv_cfg.get("min_distance_bars", 8))
+            smooth_window = int(piv_cfg.get("smoothing_window_bars", 1))
+            max_pivots = int(piv_cfg.get("max_pivots_per_window", 0))
+            max_pivots = max_pivots if max_pivots > 0 else None
+
             df_full = load_ohlcv(symbol)
             win = slice_window(df_full, meta["start_ts"], meta["end_ts"])
             if len(win) != N:
                 win = win.iloc[-N:]
 
-            closes = win["close"].to_numpy()
+            h = win["high"].to_numpy()
+            l = win["low"].to_numpy()
+            c = win["close"].to_numpy()
 
-            # pivots
-            L = cfg["swing"]["lookback_left"]; R = cfg["swing"]["lookback_right"]; sep = cfg["swing"]["min_separation"]
-            piv_hi = pivots(closes, L, R, "high", sep)
-            piv_lo = pivots(closes, L, R, "low",  sep)
+            # --- ATR + robust pivots via SciPy find_peaks (ATR-prominence) ---
+            atr = compute_atr(h, l, c, period=atr_period, mode=atr_smoothing)
+            atr_mean = float(np.nanmean(atr)) if len(atr) else 0.0
 
-            # detections
-            hs  = detect_head_shoulders(closes, piv_hi, cfg["head_shoulders"])
-            dt  = detect_double_top(closes, piv_hi, cfg["double_top"])
-            db  = detect_double_bottom(closes, piv_lo, cfg["double_bottom"])
-            tri = detect_triangle(closes, piv_hi, piv_lo, cfg["triangle"])
+            piv_hi = extract_pivots_with_prominence(
+                close=c,
+                min_prom_atr=min_prom_atr,
+                min_dist_bars=min_dist_bars,
+                atr=atr,
+                highs=True,
+                max_pivots=max_pivots,
+                smooth_window=smooth_window,
+            )
+            piv_lo = extract_pivots_with_prominence(
+                close=c,
+                min_prom_atr=min_prom_atr,
+                min_dist_bars=min_dist_bars,
+                atr=atr,
+                highs=False,
+                max_pivots=max_pivots,
+                smooth_window=smooth_window,
+            )
 
-            # presence flags and counts
-            y_hs  = 1 if len(hs)  > 0 else 0
-            y_dt  = 1 if len(dt)  > 0 else 0
-            y_db  = 1 if len(db)  > 0 else 0
-            y_tri = 1 if len(tri) > 0 else 0
+            # --- pattern detections ---
+            det_map = {name: [] for name in supported}
 
-            hs_cnt, dt_cnt, db_cnt, tri_cnt = len(hs), len(dt), len(db), len(tri)
+            if "head_and_shoulders" in active:
+                det_map["head_and_shoulders"] = detect_head_shoulders(
+                    c,
+                    piv_hi,
+                    eff_patterns.get("head_and_shoulders", {}),
+                    atr_mean,
+                    prefer_atr
+                )
 
-            # ---- Optional: still write YOLO bboxes & rich JSON (unchanged) ----
+            if "inverse_head_and_shoulders" in active:
+                det_map["inverse_head_and_shoulders"] = detect_inverse_head_shoulders(
+                    c,
+                    piv_lo,
+                    eff_patterns.get("inverse_head_and_shoulders", eff_patterns.get("head_and_shoulders", {})),
+                    atr_mean,
+                    prefer_atr
+                )
+
+            # Robust Double Top / Bottom (ATR thresholds, duration, spacing, breakout, NMS)
+            if "double_top" in active:
+                det_map["double_top"] = detect_double_top(
+                    close=c,
+                    piv_hi=piv_hi,
+                    cfg_dt=eff_patterns.get("double_top", {}),
+                    atr_mean=atr_mean,
+                    prefer_atr=prefer_atr,
+                    labels_post=labels_post
+                )
+
+            if "double_bottom" in active:
+                cfg_db = deep_merge_dict(eff_patterns.get("double_top", {}), eff_patterns.get("double_bottom", {}))
+                det_map["double_bottom"] = detect_double_bottom(
+                    close=c,
+                    piv_lo=piv_lo,
+                    cfg_db=cfg_db,
+                    atr_mean=atr_mean,
+                    prefer_atr=prefer_atr,
+                    labels_post=labels_post
+                )
+
+            # Descending triangle: geometry + image Hough gate
+            if "descending_triangle" in active:
+                tri_cfg = eff_patterns.get("descending_triangle", {}) or {}
+                tri_geom = tri_cfg.get("geometry", {}) or {}
+                tri_all = detect_triangle(c, piv_hi, piv_lo, tri_geom)
+                # image-based confirmation
+                tri_ok = []
+                if tri_all:
+                    if hough_desc_triangle_ok(png, tri_cfg):
+                        tri_ok = tri_all
+                det_map["descending_triangle"] = tri_ok
+
+            # --- presence flags and counts ---
+            flags = {name: (1 if len(det_map[name]) > 0 else 0) for name in active}
+            counts = {name+"_cnt": len(det_map[name]) for name in active}
+
+            # --- YOLO + rich JSON sidecars ---
+            cid_lookup = {v: int(k) for k, v in labels_map.items() if v in supported}
             yolo_boxes = []
-            rich = {"image": png.name, "detections": []}
+            rich_all = {"image": png.name, "detections": []}
 
-            for det_list, cls_name in [(hs,"head_shoulders"), (dt,"double_top"), (db,"double_bottom"), (tri,"triangle")]:
-                for d in det_list:
-                    # Build bbox from defining vertices
+            for name in active:
+                for d in det_map[name]:
                     xs, ys = [], []
-                    if cls_name == "head_shoulders":
-                        for (i,p) in [(d["iL"],d["pL"]), (d["iH"],d["pH"]), (d["iR"],d["pR"])]: 
+                    if name in ("head_and_shoulders","inverse_head_shoulders","inverse_head_and_shoulders"):
+                        for (i,p) in [(d["iL"],d["pL"]), (d["iH"],d["pH"]), (d["iR"],d["pR"])]:
                             xs.append(bar_to_x(i, N, W)); ys.append(price_to_y(p, y_min, y_max, H))
-                    elif cls_name == "double_top":
+                    elif name == "double_top":
                         for (i,p) in [(d["i1"],d["p1"]), (d["i2"],d["p2"]), (d["ivalley"],d["pvalley"])]:
                             xs.append(bar_to_x(i, N, W)); ys.append(price_to_y(p, y_min, y_max, H))
-                    elif cls_name == "double_bottom":
+                    elif name == "double_bottom":
                         for (i,p) in [(d["i1"],d["p1"]), (d["i2"],d["p2"]), (d["ipeak"],d["ppeak"])]:
                             xs.append(bar_to_x(i, N, W)); ys.append(price_to_y(p, y_min, y_max, H))
-                    elif cls_name == "triangle":
+                    elif name == "descending_triangle":
                         iL, iR = d["start"], d["end"]
                         p_topL = d["a_hi"]*iL + d["b_hi"]; p_topR = d["a_hi"]*iR + d["b_hi"]
                         p_botL = d["a_lo"]*iL + d["b_lo"]; p_botR = d["a_lo"]*iR + d["b_lo"]
-                        for (i,p) in [(iL,p_topL),(iR,p_topR),(iL,p_botL),(iR,p_botR)]:
-                            xs.append(bar_to_x(i, N, W)); ys.append(price_to_y(p, y_min, y_max, H))
+                        for (i,pv) in [(iL,p_topL),(iR,p_topR),(iL,p_botL),(iR,p_botR)]:
+                            xs.append(bar_to_x(i, N, W)); ys.append(price_to_y(pv, y_min, y_max, H))
+                    else:
+                        continue
 
                     xmin, xmax = max(0, min(xs)), min(W-1, max(xs))
                     ymin, ymax = max(0, min(ys)), min(H-1, max(ys))
-                    pad = cfg[cls_name].get("bbox_padding_px", 4)
+                    pad = int(eff_patterns.get(name, {}).get("bbox_padding_px", 6))
                     xmin = max(0, xmin - pad); xmax = min(W-1, xmax + pad)
                     ymin = max(0, ymin - pad); ymax = min(H-1, ymax + pad)
 
-                    cid = {"head_shoulders":0,"double_top":1,"double_bottom":2,"triangle":3}[cls_name]
+                    cid = cid_lookup.get(name, 0)
                     cx = (xmin + xmax) / 2 / W
                     cy = (ymin + ymax) / 2 / H
                     bw = (xmax - xmin) / W
                     bh = (ymax - ymin) / H
                     yolo_boxes.append((cid, cx, cy, bw, bh))
 
-                    rich["detections"].append({"class": cls_name, "bbox_px": [int(xmin),int(ymin),int(xmax),int(ymax)], "raw": d})
+                    rich_all["detections"].append({
+                        "class": name,
+                        "bbox_px": [int(xmin), int(ymin), int(xmax), int(ymax)],
+                        "raw": d
+                    })
 
-            # write YOLO (only if any detection)
             if yolo_boxes:
-                (labels_root / split).mkdir(parents=True, exist_ok=True)
-                write_yolo((labels_root / split / (png.stem + ".txt")), yolo_boxes)
-                # rich json (audit trail)
-                (labels_root / f"{split}_json").mkdir(parents=True, exist_ok=True)
-                (labels_root / f"{split}_json" / (png.stem + ".json")).write_text(json.dumps(rich, indent=2), encoding="utf-8")
+                write_yolo(out_yolo / (png.stem + ".txt"), yolo_boxes)
+                (out_json / (png.stem + ".json")).write_text(json.dumps(rich_all, indent=2), encoding="utf-8")
 
-            # ---- Append CSV row (for RF) ----
-            rows.append({
+            # --- Presence CSV row (for RF) ---
+            row = {
                 "image": png.name,
                 "split": split,
                 "symbol": symbol,
@@ -266,18 +735,25 @@ def main():
                 "bars": int(N),
                 "img_w": int(W),
                 "img_h": int(H),
-                "y_hs": y_hs, "y_dt": y_dt, "y_db": y_db, "y_tri": y_tri,
-                "hs_cnt": hs_cnt, "dt_cnt": dt_cnt, "db_cnt": db_cnt, "tri_cnt": tri_cnt
-            })
+            }
+            for name in ["head_and_shoulders","inverse_head_and_shoulders","double_top","double_bottom","descending_triangle"]:
+                if name in active:
+                    row[f"y_{name}"] = int(flags[name])
+                    row[f"{name}_cnt"] = int(counts[name+"_cnt"])
+                else:
+                    row[f"y_{name}"] = 0
+                    row[f"{name}_cnt"] = 0
 
-        print(f"✅ Split {split}: YOLO & presence flags computed.")
+            rows.append(row)
 
-    # ---- Write consolidated CSV ----
+        print(f"✅ Split {split}: computed labels for {len(pngs)} images.")
+
     out_csv = Path(args.labels_csv)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     df = pd.DataFrame(rows).sort_values(by=["split","symbol","end_ts","image"])
     df.to_csv(out_csv, index=False)
-    print(f"✅ Presence-labels CSV: {out_csv} (rows={len(df)})")
+    print(f"✅ Presence-labels CSV written: {out_csv} (rows={len(df)})")
+
 
 if __name__ == "__main__":
     main()

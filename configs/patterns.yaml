@@ -15,11 +15,11 @@ common:
   pivots:
     method: "prominence"          # ("prominence" | "savgol_peaks" | "swing_LR")
     use_atr_scaled: true           # treat thresholds in ATR units (intraday-friendly)
-    min_prominence_atr: 0.7        # peaks/valleys must stand out ≥0.7×ATR
-    min_distance_bars: 6           # avoid micro-zigzags
-    smoothing_window_bars: 3
+    min_prominence_atr: 1.2        # require clearer structure for peaks/valleys
+    min_distance_bars: 8           # avoid micro-zigzags (prev 6)
+    smoothing_window_bars: 5      # pre-smooth price series to reduce noise (prev 3)
     # Optional guards:
-    max_pivots_per_window: 40      # cap to prevent “hairy” series from exploding combinations
+    max_pivots_per_window: 36      # cap to prevent “hairy” series from exploding combinations
     ignore_inside_gaps: true       # skip pivots across large price gaps
 
   lines:
@@ -42,7 +42,7 @@ common:
 
   labels_post:                            # ⚡️
     min_box_pixels: 18
-    dedup_time_overlap_bars: 10
+    dedup_time_overlap_bars: 24          # keep only one candidate per day-long band
 
 overrides:
   # Matchers are simple globs on symbol; timeframe exact match
@@ -50,18 +50,30 @@ overrides:
       symbols: ["BTC-USD","ETH-USD"]
       timeframe: "1h"
     pivots:
-      min_prominence_atr: 0.9
-      min_distance_bars: 8
+      min_prominence_atr: 1.4
+      min_distance_bars: 10
     head_and_shoulders:
       geometry:
         head_above_shoulders_min_atr: 1.0
   - match:
       symbols: ["AAPL","NVDA","GOOGL","TSLA","AMZN","SPY","QQQ"]
       timeframe: "1h"
+    units:
+      prefer_atr_over_percent: false    # force use of % thresholds on low-ATR equities
     double_top:
+      geometry:
+        peak_height_similarity_pct: 6
+        valley_drop_min_pct: 0.015
       breakout:
         confirm:
-          threshold_percent: 0.10
+          threshold_percent: 0.35
+          within_bars: 8
+    double_bottom:
+      geometry:
+        peak_rise_min_pct: 0.015
+      breakout:
+        confirm:
+          threshold_percent: 0.35
 
 patterns:
   # 1) Head & Shoulders family (2 classes)
@@ -72,6 +84,7 @@ patterns:
       required_peaks: 3
       order: "peak-valley-peak-valley-peak"
       head_above_shoulders_min_atr: 0.8
+      head_above_shoulders_min_pct: 0.01
       shoulder_height_similarity_pct: 25
       shoulder_timing_similarity_pct: 40
       neckline:
@@ -122,11 +135,15 @@ patterns:
     direction: "bearish"
     geometry:
       peaks: 2
-      peak_height_similarity_pct: 20
+      peak_height_similarity_pct: 8      # tighter symmetry window
       valley_required: true
+      valley_drop_min_atr: 1.2           # require ≥1.2×ATR dip between peaks
+      valley_drop_min_pct: 0.012          # fallback if ATR not preferred
+      valley_min_bars_from_peaks: 4       # valley not glued to peaks
+      max_pairs_per_peak: 5               # limit combinatorial explosions
       duration:
-        min_bars: 16
-        max_bars: 120
+        min_bars: 24
+        max_bars: 110
       neckline:
         type: "level"
         max_rmsd_pct_of_height: 0.3
@@ -134,8 +151,13 @@ patterns:
       side: "down"
       confirm:
         type: "close_beyond_level"
-        threshold_atr: 0.35         # close ≤ neckline − 0.35×ATR
-        threshold_percent: 0.12      # ~0.12% beyond neckline (large caps 1h)
+        threshold_atr: 0.6          # close ≤ neckline − 0.6×ATR
+        threshold_percent: 0.25      # fallback on % for low ATR regimes
+        within_bars: 12             # confirm swiftly after 2nd peak
+    # score choice if several candidates
+    scoring:
+      weight_valley_depth_atr: 1.0
+      weight_span: 0.4
     invalidation:
       second_peak_exceeds_first_pct: 0.6
     trade_plan:
@@ -150,6 +172,10 @@ patterns:
     class_id: 3
     direction: "bullish"
     inherits: "double_top"
+    geometry:
+      peak_rise_min_atr: 0.8
+      peak_rise_min_pct: 0.008
+      max_pairs_per_peak: 5
     breakout:
       side: "up"
       confirm:
@@ -187,6 +213,22 @@ patterns:
         atr_mult: 1.6
       target:
         mode: "measured_move"        # widest part height
+    hough:
+      enabled: true
+      canny:
+        blur_ksize: 3
+        t1: 50
+        t2: 150
+      houghp:
+        rho: 1.0
+        theta_deg: 1.0
+        thresh: 45
+        min_line_len: 40
+        max_line_gap: 10
+      # slope constraints (in degrees):
+      upper_max_deg: -5        # must be negative and ≤ -5°
+      lower_abs_max_deg: 4     # near-flat lower line
+      min_support_lines: 3     # how many lines should support each sid
 
   ascending_triangle:                     # ⚡️ explicit disabled twins
     enabled: false
