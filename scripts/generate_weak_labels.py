@@ -147,11 +147,15 @@ def extract_pivots_with_prominence(close: np.ndarray,
                                    atr: np.ndarray,
                                    highs: bool = True,
                                    max_pivots: int | None = None,
-                                   smooth_window: int = 1) -> list[tuple[int, float]]:
+                                   smooth_window: int = 1,
+                                   adaptive_prom_pct_of_range: float = 0.0) -> list[tuple[int, float]]:
     """find_peaks on close (for highs) or on -close (for lows), with prominence in ATR units."""
     # convert ATR-threshold to data units (≈ average ATR over window)
     atr_mean = float(np.nanmean(atr)) if atr is not None and len(atr) else 0.0
     prom_abs = max(1e-9, min_prom_atr * atr_mean)
+    if adaptive_prom_pct_of_range > 0.0:
+        price_range = float(np.nanmax(close) - np.nanmin(close))
+        prom_abs = max(prom_abs, adaptive_prom_pct_of_range * max(price_range, 1e-9))
 
     series = close if highs else (-close)
     series = _smooth_series(series, smooth_window)
@@ -201,14 +205,32 @@ def _nms_time(dets: list[dict], dedup_bars: int) -> list[dict]:
         kept.append(d)
     return kept
 
+def _apply_dynamic_floor(base_abs: float,
+                         dyn_cfg: dict | None,
+                         pct_key: str,
+                         pattern_height: float,
+                         price_ref: float,
+                         atr_recent: float) -> float:
+    val = base_abs
+    if not dyn_cfg:
+        return val
+    pct = float(dyn_cfg.get(pct_key, 0.0)) / 100.0
+    if pct > 0.0:
+        val = max(val, pct * max(pattern_height, 1e-9))
+    atr_mult = float(dyn_cfg.get("atr_floor_mult", 0.0))
+    if atr_mult > 0.0:
+        val = max(val, atr_mult * max(atr_recent, 1e-9))
+    return val
+
 # --- Robust Double Top ---
 def detect_double_top(close: np.ndarray,
                       piv_hi: list[tuple[int,float]],
                       cfg_dt: dict,
-                      atr_mean: float,
+                      atr: np.ndarray,
                       prefer_atr: bool,
                       labels_post: dict | None = None) -> list[dict]:
     out = []
+    atr_mean = float(np.nanmean(atr)) if len(atr) else 0.0
     geom = (cfg_dt.get("geometry") or {})
     dur  = geom.get("duration", {})
     min_span = int(dur.get("min_bars", 16)); max_span = int(dur.get("max_bars", 120))
@@ -222,10 +244,20 @@ def detect_double_top(close: np.ndarray,
     br_thr_atr = brc.get("threshold_atr", None)
     br_thr_pct = brc.get("threshold_percent", None)
     br_within  = brc.get("within_bars", None)
+    require_confirmation = bool(br.get("require_confirmation", True))
+    allow_pre_breakout = bool(cfg_dt.get("label_allow_pre_breakout", False))
 
     sc = (cfg_dt.get("scoring") or {})
     w_depth = float(sc.get("weight_valley_depth_atr", 1.0))
     w_span  = float(sc.get("weight_span", 0.2))
+
+    dyn = (geom.get("dynamic_thresholds") or {})
+    dyn_lookback = int(dyn.get("vol_lookback_bars", 36))
+
+    def _recent_atr():
+        if len(atr) == 0:
+            return atr_mean
+        return float(np.nanmean(atr[-dyn_lookback:])) if dyn_lookback > 0 else atr_mean
 
     piv_sorted = sorted(piv_hi, key=lambda t: t[0])
     total = len(piv_sorted)
@@ -248,31 +280,52 @@ def detect_double_top(close: np.ndarray,
             v_idx = int(np.argmin(local) + j0)
             v = float(close[v_idx])
 
-            need_abs = _choose_abs_threshold(
+            base_need = _choose_abs_threshold(
                 geom.get("valley_drop_min_atr"),
                 geom.get("valley_drop_min_pct"),
                 atr_mean, mid, prefer_atr
             )
-            if (mid - v) < need_abs:
+            pattern_height = max(p1, p2) - v
+            recent_atr = _recent_atr()
+            dyn_need = _apply_dynamic_floor(
+                base_need,
+                dyn,
+                pct_key="valley_drop_min_height_pct",
+                pattern_height=pattern_height,
+                price_ref=mid,
+                atr_recent=recent_atr
+            )
+            if (mid - v) < dyn_need:
                 continue
 
+            breakout_ok = True
             if brc:
-                thr_abs = _choose_abs_threshold(br_thr_atr, br_thr_pct, atr_mean, mid, prefer_atr)
+                base_thr = _choose_abs_threshold(br_thr_atr, br_thr_pct, atr_mean, mid, prefer_atr)
+                thr_abs = _apply_dynamic_floor(
+                    base_thr,
+                    dyn,
+                    pct_key="breakout_height_pct",
+                    pattern_height=pattern_height,
+                    price_ref=mid,
+                    atr_recent=recent_atr
+                )
                 if br_within:
                     future = close[i2+1 : i2+1 + br_within]
                 else:
                     future = close[i2+1 :]
                 if len(future) == 0:
                     continue
-                if not _level_breakout_confirm(future, level=v, side=br_side, thr_abs=thr_abs, within_bars=br_within):
-                    continue
+                breakout_ok = _level_breakout_confirm(future, level=v, side=br_side, thr_abs=thr_abs, within_bars=br_within)
+            if not breakout_ok and require_confirmation and not allow_pre_breakout:
+                continue
 
             ic = int(0.5*(i1+i2))
             depth = (mid - v)/max(1e-9, atr_mean)
             span_score = span / max(1.0, float(max_span))
             score = w_depth * depth + w_span * span_score
             out.append({"type":"double_top","i1":i1,"p1":p1,"i2":i2,"p2":p2,
-                        "ivalley":v_idx,"pvalley":v,"span":span,"score":float(score),"icenter":ic})
+                        "ivalley":v_idx,"pvalley":v,"span":span,"score":float(score),
+                        "icenter":ic,"breakout_confirmed": bool(breakout_ok)})
     dedup = int((labels_post or {}).get("dedup_time_overlap_bars", 10))
     return _nms_time(out, dedup)
 
@@ -280,10 +333,11 @@ def detect_double_top(close: np.ndarray,
 def detect_double_bottom(close: np.ndarray,
                          piv_lo: list[tuple[int,float]],
                          cfg_db: dict,
-                         atr_mean: float,
+                         atr: np.ndarray,
                          prefer_atr: bool,
                          labels_post: dict | None = None) -> list[dict]:
     out = []
+    atr_mean = float(np.nanmean(atr)) if len(atr) else 0.0
     geom = (cfg_db.get("geometry") or {})
     dur  = geom.get("duration", {})
     min_span = int(dur.get("min_bars", 16)); max_span = int(dur.get("max_bars", 120))
@@ -297,10 +351,20 @@ def detect_double_bottom(close: np.ndarray,
     br_thr_atr = brc.get("threshold_atr", None)
     br_thr_pct = brc.get("threshold_percent", None)
     br_within  = brc.get("within_bars", None)
+    require_confirmation = bool(br.get("require_confirmation", True))
+    allow_pre_breakout = bool(cfg_db.get("label_allow_pre_breakout", False))
 
     sc = (cfg_db.get("scoring") or {})
     w_rise = float(sc.get("weight_valley_depth_atr", 1.0))
     w_span = float(sc.get("weight_span", 0.2))
+
+    dyn = (geom.get("dynamic_thresholds") or {})
+    dyn_lookback = int(dyn.get("vol_lookback_bars", 36))
+
+    def _recent_atr():
+        if len(atr) == 0:
+            return atr_mean
+        return float(np.nanmean(atr[-dyn_lookback:])) if dyn_lookback > 0 else atr_mean
 
     piv_sorted = sorted(piv_lo, key=lambda t: t[0])
     total = len(piv_sorted)
@@ -323,31 +387,52 @@ def detect_double_bottom(close: np.ndarray,
             peak_idx = int(np.argmax(local) + j0)
             pk = float(close[peak_idx])
 
-            need_abs = _choose_abs_threshold(
+            base_need = _choose_abs_threshold(
                 geom.get("peak_rise_min_atr"),
                 geom.get("peak_rise_min_pct"),
                 atr_mean, mid, prefer_atr
             )
-            if (pk - mid) < need_abs:
+            pattern_height = pk - min(p1, p2)
+            recent_atr = _recent_atr()
+            dyn_need = _apply_dynamic_floor(
+                base_need,
+                dyn,
+                pct_key="valley_drop_min_height_pct",
+                pattern_height=pattern_height,
+                price_ref=mid,
+                atr_recent=recent_atr
+            )
+            if (pk - mid) < dyn_need:
                 continue
 
+            breakout_ok = True
             if brc:
-                thr_abs = _choose_abs_threshold(br_thr_atr, br_thr_pct, atr_mean, mid, prefer_atr)
+                base_thr = _choose_abs_threshold(br_thr_atr, br_thr_pct, atr_mean, mid, prefer_atr)
+                thr_abs = _apply_dynamic_floor(
+                    base_thr,
+                    dyn,
+                    pct_key="breakout_height_pct",
+                    pattern_height=pattern_height,
+                    price_ref=mid,
+                    atr_recent=recent_atr
+                )
                 if br_within:
                     future = close[i2+1 : i2+1 + br_within]
                 else:
                     future = close[i2+1 :]
                 if len(future) == 0:
                     continue
-                if not _level_breakout_confirm(future, level=pk, side=br_side, thr_abs=thr_abs, within_bars=br_within):
-                    continue
+                breakout_ok = _level_breakout_confirm(future, level=pk, side=br_side, thr_abs=thr_abs, within_bars=br_within)
+            if not breakout_ok and require_confirmation and not allow_pre_breakout:
+                continue
 
             ic = int(0.5*(i1+i2))
             rise = (pk - mid)/max(1e-9, atr_mean)
             span_score = span / max(1.0, float(max_span))
             score = w_rise * rise + w_span * span_score
             out.append({"type":"double_bottom","i1":i1,"p1":p1,"i2":i2,"p2":p2,
-                        "ipeak":peak_idx,"ppeak":pk,"span":span,"score":float(score),"icenter":ic})
+                        "ipeak":peak_idx,"ppeak":pk,"span":span,"score":float(score),
+                        "icenter":ic,"breakout_confirmed": bool(breakout_ok)})
     dedup = int((labels_post or {}).get("dedup_time_overlap_bars", 10))
     return _nms_time(out, dedup)
 
@@ -583,6 +668,7 @@ def main():
             smooth_window = int(piv_cfg.get("smoothing_window_bars", 1))
             max_pivots = int(piv_cfg.get("max_pivots_per_window", 0))
             max_pivots = max_pivots if max_pivots > 0 else None
+            adaptive_prom_pct = float(piv_cfg.get("adaptive_prominence_pct_of_range", 0.0))
 
             df_full = load_ohlcv(symbol)
             win = slice_window(df_full, meta["start_ts"], meta["end_ts"])
@@ -605,6 +691,7 @@ def main():
                 highs=True,
                 max_pivots=max_pivots,
                 smooth_window=smooth_window,
+                adaptive_prom_pct_of_range=adaptive_prom_pct,
             )
             piv_lo = extract_pivots_with_prominence(
                 close=c,
@@ -614,6 +701,7 @@ def main():
                 highs=False,
                 max_pivots=max_pivots,
                 smooth_window=smooth_window,
+                adaptive_prom_pct_of_range=adaptive_prom_pct,
             )
 
             # --- pattern detections ---
@@ -643,7 +731,7 @@ def main():
                     close=c,
                     piv_hi=piv_hi,
                     cfg_dt=eff_patterns.get("double_top", {}),
-                    atr_mean=atr_mean,
+                    atr=atr,
                     prefer_atr=prefer_atr,
                     labels_post=labels_post
                 )
@@ -654,7 +742,7 @@ def main():
                     close=c,
                     piv_lo=piv_lo,
                     cfg_db=cfg_db,
-                    atr_mean=atr_mean,
+                    atr=atr,
                     prefer_atr=prefer_atr,
                     labels_post=labels_post
                 )
@@ -672,8 +760,12 @@ def main():
                 det_map["descending_triangle"] = tri_ok
 
             # --- presence flags and counts ---
-            flags = {name: (1 if len(det_map[name]) > 0 else 0) for name in active}
             counts = {name+"_cnt": len(det_map[name]) for name in active}
+            confirmed_counts = {
+                name+"_confirmed_cnt": sum(1 for d in det_map[name] if d.get("breakout_confirmed", True))
+                for name in active
+            }
+            flags = {name: (1 if confirmed_counts[name+"_confirmed_cnt"] > 0 else 0) for name in active}
 
             # --- YOLO + rich JSON sidecars ---
             cid_lookup = {v: int(k) for k, v in labels_map.items() if v in supported}
@@ -740,9 +832,11 @@ def main():
                 if name in active:
                     row[f"y_{name}"] = int(flags[name])
                     row[f"{name}_cnt"] = int(counts[name+"_cnt"])
+                    row[f"{name}_confirmed_cnt"] = int(confirmed_counts[name+"_confirmed_cnt"])
                 else:
                     row[f"y_{name}"] = 0
                     row[f"{name}_cnt"] = 0
+                    row[f"{name}_confirmed_cnt"] = 0
 
             rows.append(row)
 

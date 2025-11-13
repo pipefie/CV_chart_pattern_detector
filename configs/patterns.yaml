@@ -18,6 +18,7 @@ common:
     min_prominence_atr: 1.2        # require clearer structure for peaks/valleys
     min_distance_bars: 8           # avoid micro-zigzags (prev 6)
     smoothing_window_bars: 5      # pre-smooth price series to reduce noise (prev 3)
+    adaptive_prominence_pct_of_range: 0.004   # fallback vs total price range
     # Optional guards:
     max_pivots_per_window: 36      # cap to prevent “hairy” series from exploding combinations
     ignore_inside_gaps: true       # skip pivots across large price gaps
@@ -141,6 +142,11 @@ patterns:
       valley_drop_min_pct: 0.012          # fallback if ATR not preferred
       valley_min_bars_from_peaks: 4       # valley not glued to peaks
       max_pairs_per_peak: 5               # limit combinatorial explosions
+      dynamic_thresholds:
+        valley_drop_min_height_pct: 12    # 12% of pattern height as extra guard
+        breakout_height_pct: 6            # breakout must travel ≥6% of pattern height
+        atr_floor_mult: 0.5               # fallback on half ATR of recent vol
+        vol_lookback_bars: 36
       duration:
         min_bars: 24
         max_bars: 110
@@ -149,11 +155,13 @@ patterns:
         max_rmsd_pct_of_height: 0.3
     breakout:
       side: "down"
+      require_confirmation: true
       confirm:
         type: "close_beyond_level"
         threshold_atr: 0.6          # close ≤ neckline − 0.6×ATR
         threshold_percent: 0.25      # fallback on % for low ATR regimes
         within_bars: 12             # confirm swiftly after 2nd peak
+    label_allow_pre_breakout: true
     # score choice if several candidates
     scoring:
       weight_valley_depth_atr: 1.0
@@ -176,11 +184,18 @@ patterns:
       peak_rise_min_atr: 0.8
       peak_rise_min_pct: 0.008
       max_pairs_per_peak: 5
+      dynamic_thresholds:
+        valley_drop_min_height_pct: 12
+        breakout_height_pct: 6
+        atr_floor_mult: 0.5
+        vol_lookback_bars: 36
     breakout:
       side: "up"
+      require_confirmation: true
       confirm:
         type: "close_beyond_level"
         threshold_percent: 0.12
+    label_allow_pre_breakout: true
     trade_plan:
       stop:
         mode: "swing_point"
