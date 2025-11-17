@@ -15,7 +15,7 @@ common:
   pivots:
     method: "prominence"          # ("prominence" | "savgol_peaks" | "swing_LR")
     use_atr_scaled: true           # treat thresholds in ATR units (intraday-friendly)
-    min_prominence_atr: 1.2        # require clearer structure for peaks/valleys
+    min_prominence_atr: 1.0        # slightly softer to avoid starving candidates
     min_distance_bars: 8           # avoid micro-zigzags (prev 6)
     smoothing_window_bars: 5      # pre-smooth price series to reduce noise (prev 3)
     adaptive_prominence_pct_of_range: 0.004   # fallback vs total price range
@@ -51,7 +51,7 @@ overrides:
       symbols: ["BTC-USD","ETH-USD"]
       timeframe: "1h"
     pivots:
-      min_prominence_atr: 1.4
+      min_prominence_atr: 1.15     # allow more crypto structure while still filtering chop
       min_distance_bars: 10
     head_and_shoulders:
       geometry:
@@ -84,8 +84,8 @@ patterns:
     geometry:
       required_peaks: 3
       order: "peak-valley-peak-valley-peak"
-      head_above_shoulders_min_atr: 0.8
-      head_above_shoulders_min_pct: 0.01
+      head_above_shoulders_min_atr: 0.6
+      head_above_shoulders_min_pct: 0.006
       shoulder_height_similarity_pct: 25
       shoulder_timing_similarity_pct: 40
       neckline:
@@ -115,7 +115,7 @@ patterns:
       risk:
         pct_of_equity: 0.5
     visual:
-      min_head_to_shoulder_ratio: 1.15
+      min_head_to_shoulder_ratio: 1.02   # permit slightly flatter heads while still enforcing a higher head
       weight_symmetry: 0.8
       weight_head_prominence: 1.2
 
@@ -134,7 +134,7 @@ patterns:
         mode: "swing_point"
         swing: "below_right_shoulder"
     visual:
-      min_head_depth_ratio: 0.97
+      min_head_depth_ratio: 0.92   # allow slightly flatter inverse structures
       weight_symmetry: 0.7
       weight_head_prominence: 1.1
 
@@ -146,18 +146,20 @@ patterns:
       peaks: 2
       peak_height_similarity_pct: 8      # tighter symmetry window
       valley_required: true
-      valley_drop_min_atr: 1.2           # require ≥1.2×ATR dip between peaks
-      valley_drop_min_pct: 0.012          # fallback if ATR not preferred
-      valley_min_bars_from_peaks: 4       # valley not glued to peaks
-      max_pairs_per_peak: 5               # limit combinatorial explosions
+      valley_drop_min_atr: 0.8           # lower to admit more plausible Ms
+      valley_drop_min_pct: 0.009          # fallback if ATR not preferred
+      valley_min_bars_from_peaks: 3       # valley not glued to peaks
+      max_pairs_per_peak: 6               # limit combinatorial explosions
+      min_peak_separation_bars: 8
+      max_peak_separation_bars: 110
       dynamic_thresholds:
-        valley_drop_min_height_pct: 12    # 12% of pattern height as extra guard
-        breakout_height_pct: 6            # breakout must travel ≥6% of pattern height
+        valley_drop_min_height_pct: 8     # relax depth relative to height
+        breakout_height_pct: 5            # breakout must travel ≥5% of pattern height
         atr_floor_mult: 0.5               # fallback on half ATR of recent vol
         vol_lookback_bars: 36
       duration:
-        min_bars: 24
-        max_bars: 110
+        min_bars: 20
+        max_bars: 140
       neckline:
         type: "level"
         max_rmsd_pct_of_height: 0.3
@@ -166,9 +168,9 @@ patterns:
       require_confirmation: true
       confirm:
         type: "close_beyond_level"
-        threshold_atr: 0.6          # close ≤ neckline − 0.6×ATR
-        threshold_percent: 0.25      # fallback on % for low ATR regimes
-        within_bars: 12             # confirm swiftly after 2nd peak
+        threshold_atr: 0.45          # close ≤ neckline − 0.45×ATR
+        threshold_percent: 0.18      # fallback on % for low ATR regimes
+        within_bars: 14             # confirm swiftly after 2nd peak
     label_allow_pre_breakout: true
     # score choice if several candidates
     scoring:
@@ -185,7 +187,7 @@ patterns:
         mode: "measured_move"
     visual:
       require_m_shape: true
-      max_valley_to_peak_ratio: 0.7
+      max_valley_to_peak_ratio: 0.06    # valley depth needs only a modest 6% dip vs peaks
       weight_peak_alignment: 1.3
       weight_valley_depth: 0.7
       weight_pattern_height: 0.9
@@ -195,9 +197,10 @@ patterns:
     direction: "bullish"
     inherits: "double_top"
     geometry:
-      peak_rise_min_atr: 0.8
-      peak_rise_min_pct: 0.008
-      max_pairs_per_peak: 5
+      peak_rise_min_atr: 0.6
+      peak_rise_min_pct: 0.006
+      max_pairs_per_peak: 6
+      peak_height_similarity_pct: 8
       dynamic_thresholds:
         valley_drop_min_height_pct: 12
         breakout_height_pct: 6
@@ -208,7 +211,9 @@ patterns:
       require_confirmation: true
       confirm:
         type: "close_beyond_level"
-        threshold_percent: 0.12
+        threshold_atr: 0.45
+        threshold_percent: 0.18
+        within_bars: 14
     label_allow_pre_breakout: true
     trade_plan:
       stop:
@@ -216,9 +221,9 @@ patterns:
         swing: "below_second_bottom"
     visual:
       require_w_shape: true
-      min_trough_separation_bars: 8
-      max_trough_separation_bars: 65
-      min_peak_to_trough_ratio: 0.008
+      min_trough_separation_bars: 6
+      max_trough_separation_bars: 70
+      min_peak_to_trough_ratio: 0.01
       weight_trough_alignment: 1.2
       weight_peak_rise: 0.6
       weight_pattern_height: 0.8
