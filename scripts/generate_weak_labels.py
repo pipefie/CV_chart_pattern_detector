@@ -205,6 +205,19 @@ def _nms_time(dets: list[dict], dedup_bars: int) -> list[dict]:
         kept.append(d)
     return kept
 
+def _has_trend(closes: np.ndarray, idx: int, lookback: int, direction: str) -> bool:
+    """Rough trend check using start-end slope over lookback bars prior to idx."""
+    if lookback <= 1 or idx <= 1:
+        return True
+    start = max(0, idx - lookback)
+    if start >= idx:
+        return True
+    c0 = float(closes[start]); c1 = float(closes[idx])
+    if direction == "up":
+        return c1 > c0
+    else:
+        return c1 < c0
+
 def _apply_dynamic_floor(base_abs: float,
                          dyn_cfg: dict | None,
                          pct_key: str,
@@ -224,11 +237,13 @@ def _apply_dynamic_floor(base_abs: float,
 
 # --- Robust Double Top ---
 def detect_double_top(close: np.ndarray,
+                      volume: np.ndarray | None,
                       piv_hi: list[tuple[int,float]],
                       cfg_dt: dict,
                       atr: np.ndarray,
                       prefer_atr: bool,
-                      labels_post: dict | None = None) -> list[dict]:
+                      labels_post: dict | None = None,
+                      debug_log: list | None = None) -> list[dict]:
     out = []
     atr_mean = float(np.nanmean(atr)) if len(atr) else 0.0
     geom = (cfg_dt.get("geometry") or {})
@@ -253,6 +268,8 @@ def detect_double_top(close: np.ndarray,
 
     dyn = (geom.get("dynamic_thresholds") or {})
     dyn_lookback = int(dyn.get("vol_lookback_bars", 36))
+
+    min_height_atr = float(geom.get("min_height_atr", 0.0))
 
     def _recent_atr():
         if len(atr) == 0:
@@ -296,6 +313,14 @@ def detect_double_top(close: np.ndarray,
                 atr_recent=recent_atr
             )
             if (mid - v) < dyn_need:
+                if debug_log is not None:
+                    debug_log.append({"pattern":"double_top","reason":"valley_depth","mid":mid,"v":v,"need":dyn_need,"i1":i1,"i2":i2})
+                continue
+
+            # pattern height floor vs ATR
+            if min_height_atr > 0 and (max(p1, p2) - v) < (min_height_atr * max(1e-9, atr_mean)):
+                if debug_log is not None:
+                    debug_log.append({"pattern":"double_top","reason":"height_floor","height":max(p1,p2)-v,"need":min_height_atr*atr_mean,"i1":i1,"i2":i2})
                 continue
 
             breakout_ok = True
@@ -316,7 +341,18 @@ def detect_double_top(close: np.ndarray,
                 if len(future) == 0:
                     continue
                 breakout_ok = _level_breakout_confirm(future, level=v, side=br_side, thr_abs=thr_abs, within_bars=br_within)
+
+                # volume spike on breakout relative to recent average
+                if breakout_ok and volume is not None and len(volume) == len(close):
+                    recent_vol = float(np.nanmean(volume[max(0, i2 - dyn_lookback):i2])) if dyn_lookback > 0 else float(np.nanmean(volume))
+                    brk_vol = float(np.nanmean(volume[i2+1 : i2+1 + (br_within or 1)])) if br_within else float(volume[i2+1])
+                    if recent_vol > 0 and brk_vol < 1.5 * recent_vol:
+                        breakout_ok = False
+                        if debug_log is not None:
+                            debug_log.append({"pattern":"double_top","reason":"low_breakout_volume","brk_vol":brk_vol,"recent_vol":recent_vol,"i2":i2})
             if not breakout_ok and require_confirmation and not allow_pre_breakout:
+                if debug_log is not None:
+                    debug_log.append({"pattern":"double_top","reason":"no_breakout","level":v,"thr_abs":thr_abs,"i2":i2})
                 continue
 
             ic = int(0.5*(i1+i2))
@@ -331,11 +367,13 @@ def detect_double_top(close: np.ndarray,
 
 # --- Robust Double Bottom ---
 def detect_double_bottom(close: np.ndarray,
+                         volume: np.ndarray | None,
                          piv_lo: list[tuple[int,float]],
                          cfg_db: dict,
                          atr: np.ndarray,
                          prefer_atr: bool,
-                         labels_post: dict | None = None) -> list[dict]:
+                         labels_post: dict | None = None,
+                         debug_log: list | None = None) -> list[dict]:
     out = []
     atr_mean = float(np.nanmean(atr)) if len(atr) else 0.0
     geom = (cfg_db.get("geometry") or {})
@@ -360,6 +398,8 @@ def detect_double_bottom(close: np.ndarray,
 
     dyn = (geom.get("dynamic_thresholds") or {})
     dyn_lookback = int(dyn.get("vol_lookback_bars", 36))
+
+    min_height_atr = float(geom.get("min_height_atr", 0.0))
 
     def _recent_atr():
         if len(atr) == 0:
@@ -403,6 +443,13 @@ def detect_double_bottom(close: np.ndarray,
                 atr_recent=recent_atr
             )
             if (pk - mid) < dyn_need:
+                if debug_log is not None:
+                    debug_log.append({"pattern":"double_bottom","reason":"peak_rise","mid":mid,"pk":pk,"need":dyn_need,"i1":i1,"i2":i2})
+                continue
+
+            if min_height_atr > 0 and (pk - min(p1, p2)) < (min_height_atr * max(1e-9, atr_mean)):
+                if debug_log is not None:
+                    debug_log.append({"pattern":"double_bottom","reason":"height_floor","height":pk-min(p1,p2),"need":min_height_atr*atr_mean,"i1":i1,"i2":i2})
                 continue
 
             breakout_ok = True
@@ -423,7 +470,17 @@ def detect_double_bottom(close: np.ndarray,
                 if len(future) == 0:
                     continue
                 breakout_ok = _level_breakout_confirm(future, level=pk, side=br_side, thr_abs=thr_abs, within_bars=br_within)
+
+                if breakout_ok and volume is not None and len(volume) == len(close):
+                    recent_vol = float(np.nanmean(volume[max(0, i2 - dyn_lookback):i2])) if dyn_lookback > 0 else float(np.nanmean(volume))
+                    brk_vol = float(np.nanmean(volume[i2+1 : i2+1 + (br_within or 1)])) if br_within else float(volume[i2+1])
+                    if recent_vol > 0 and brk_vol < 1.5 * recent_vol:
+                        breakout_ok = False
+                        if debug_log is not None:
+                            debug_log.append({"pattern":"double_bottom","reason":"low_breakout_volume","brk_vol":brk_vol,"recent_vol":recent_vol,"i2":i2})
             if not breakout_ok and require_confirmation and not allow_pre_breakout:
+                if debug_log is not None:
+                    debug_log.append({"pattern":"double_bottom","reason":"no_breakout","level":pk,"thr_abs":thr_abs,"i2":i2})
                 continue
 
             ic = int(0.5*(i1+i2))
@@ -437,10 +494,12 @@ def detect_double_bottom(close: np.ndarray,
     return _nms_time(out, dedup)
 
 def detect_head_shoulders(closes: np.ndarray,
+                          volume: np.ndarray | None,
                           piv_hi: list[tuple[int,float]],
                           cfg: dict,
                           atr_mean: float,
-                          prefer_atr: bool) -> list[dict]:
+                          prefer_atr: bool,
+                          debug_log: list | None = None) -> list[dict]:
     """Classic H&S: three highs with middle > shoulders + rough time symmetry."""
     out = []
     geom = cfg.get("geometry", {})
@@ -448,6 +507,8 @@ def detect_head_shoulders(closes: np.ndarray,
     dur     = geom.get("duration", {})
     min_span = int(dur.get("min_bars", 20)); max_span = int(dur.get("max_bars", 120))
     shoulder_sim = float(geom.get("shoulder_height_similarity_pct", 25)) / 100.0
+    min_height_atr = float(geom.get("min_height_atr", 0.0))
+    trend_lookback = int(geom.get("trend_lookback_bars", 0))
     piv_sorted = sorted(piv_hi, key=lambda t: t[0])
     for iL, pL in piv_sorted:
         for iH, pH in piv_sorted:
@@ -458,6 +519,8 @@ def detect_head_shoulders(closes: np.ndarray,
                 if span < min_span or span > max_span: continue
                 sh_avg = 0.5*(pL+pR)
                 if abs(pL - pR)/max(1e-9, sh_avg) > shoulder_sim:
+                    if debug_log is not None:
+                        debug_log.append({"pattern":"head_shoulders","reason":"shoulder_height","iL":iL,"iR":iR})
                     continue
                 head_need = _choose_abs_threshold(
                     geom.get("head_above_shoulders_min_atr"),
@@ -467,18 +530,42 @@ def detect_head_shoulders(closes: np.ndarray,
                     prefer_atr
                 )
                 if (pH - sh_avg) < max(head_need, 0.01 * sh_avg):
+                    if debug_log is not None:
+                        debug_log.append({"pattern":"head_shoulders","reason":"head_height","iH":iH,"need":head_need})
+                    continue
+                if min_height_atr > 0 and (pH - min(pL, pR)) < (min_height_atr * max(1e-9, atr_mean)):
+                    if debug_log is not None:
+                        debug_log.append({"pattern":"head_shoulders","reason":"height_floor","height":pH-min(pL,pR),"need":min_height_atr*atr_mean})
                     continue
                 ideal = 0.5*(iL+iH)
                 tol_bars = max(1, int(sym_pct * span))
-                if abs(iR - ideal) > tol_bars: continue
+                if abs(iR - ideal) > tol_bars:
+                    if debug_log is not None:
+                        debug_log.append({"pattern":"head_shoulders","reason":"timing_symmetry","iR":iR})
+                    continue
+                if trend_lookback > 0 and not _has_trend(closes, iL, trend_lookback, direction="up"):
+                    if debug_log is not None:
+                        debug_log.append({"pattern":"head_shoulders","reason":"no_uptrend","iL":iL})
+                    continue
+                # volume ordering: head < LS, RS < head
+                if volume is not None and len(volume) == len(closes):
+                    vol_L = float(volume[iL]) if iL < len(volume) else 0.0
+                    vol_H = float(volume[iH]) if iH < len(volume) else 0.0
+                    vol_R = float(volume[iR]) if iR < len(volume) else 0.0
+                    if not (vol_H < 0.9 * vol_L and vol_R < 0.9 * vol_H):
+                        if debug_log is not None:
+                            debug_log.append({"pattern":"head_shoulders","reason":"volume_order","vol_L":vol_L,"vol_H":vol_H,"vol_R":vol_R})
+                        continue
                 out.append({"type":"head_shoulders","iL":iL,"pL":pL,"iH":iH,"pH":pH,"iR":iR,"pR":pR})
     return out
 
 def detect_inverse_head_shoulders(closes: np.ndarray,
+                                  volume: np.ndarray | None,
                                   piv_lo: list[tuple[int,float]],
                                   cfg: dict,
                                   atr_mean: float,
-                                  prefer_atr: bool) -> list[dict]:
+                                  prefer_atr: bool,
+                                  debug_log: list | None = None) -> list[dict]:
     """Inverse H&S: three lows with middle (head) lower than shoulders + rough time symmetry."""
     out = []
     geom = cfg.get("geometry", {})
@@ -486,6 +573,8 @@ def detect_inverse_head_shoulders(closes: np.ndarray,
     dur     = geom.get("duration", {})
     min_span = int(dur.get("min_bars", 20)); max_span = int(dur.get("max_bars", 120))
     shoulder_sim = float(geom.get("shoulder_height_similarity_pct", 25)) / 100.0
+    min_height_atr = float(geom.get("min_height_atr", 0.0))
+    trend_lookback = int(geom.get("trend_lookback_bars", 0))
     piv_sorted = sorted(piv_lo, key=lambda t: t[0])
     for iL, pL in piv_sorted:
         for iH, pH in piv_sorted:
@@ -496,6 +585,8 @@ def detect_inverse_head_shoulders(closes: np.ndarray,
                 if span < min_span or span > max_span: continue
                 sh_avg = 0.5*(pL+pR)
                 if abs(pL - pR)/max(1e-9, sh_avg) > shoulder_sim:
+                    if debug_log is not None:
+                        debug_log.append({"pattern":"inverse_head_shoulders","reason":"shoulder_height","iL":iL,"iR":iR})
                     continue
                 head_need = _choose_abs_threshold(
                     geom.get("head_above_shoulders_min_atr"),
@@ -505,10 +596,31 @@ def detect_inverse_head_shoulders(closes: np.ndarray,
                     prefer_atr
                 )
                 if (sh_avg - pH) < max(head_need, 0.01 * sh_avg):
+                    if debug_log is not None:
+                        debug_log.append({"pattern":"inverse_head_shoulders","reason":"head_height","iH":iH,"need":head_need})
+                    continue
+                if min_height_atr > 0 and (max(pL, pR) - pH) < (min_height_atr * max(1e-9, atr_mean)):
+                    if debug_log is not None:
+                        debug_log.append({"pattern":"inverse_head_shoulders","reason":"height_floor","height":max(pL,pR)-pH,"need":min_height_atr*atr_mean})
                     continue
                 ideal = 0.5*(iL+iH)
                 tol_bars = max(1, int(sym_pct * span))
-                if abs(iR - ideal) > tol_bars: continue
+                if abs(iR - ideal) > tol_bars:
+                    if debug_log is not None:
+                        debug_log.append({"pattern":"inverse_head_shoulders","reason":"timing_symmetry","iR":iR})
+                    continue
+                if trend_lookback > 0 and not _has_trend(closes, iL, trend_lookback, direction="down"):
+                    if debug_log is not None:
+                        debug_log.append({"pattern":"inverse_head_shoulders","reason":"no_downtrend","iL":iL})
+                    continue
+                if volume is not None and len(volume) == len(closes):
+                    vol_L = float(volume[iL]) if iL < len(volume) else 0.0
+                    vol_H = float(volume[iH]) if iH < len(volume) else 0.0
+                    vol_R = float(volume[iR]) if iR < len(volume) else 0.0
+                    if not (vol_L < 0.9 * vol_H and vol_R < 0.9 * vol_L):
+                        if debug_log is not None:
+                            debug_log.append({"pattern":"inverse_head_shoulders","reason":"volume_order","vol_L":vol_L,"vol_H":vol_H,"vol_R":vol_R})
+                        continue
                 out.append({"type":"inverse_head_shoulders","iL":iL,"pL":pL,"iH":iH,"pH":pH,"iR":iR,"pR":pR})
     return out
 
@@ -629,6 +741,7 @@ def main():
 
     cfg_cache: dict[tuple[str,str], tuple[dict, dict, list[str]]] = {}
     rows = []
+    debug_log = []
 
     for split in args.splits:
         img_dir = Path(args.images_root) / split
@@ -678,6 +791,7 @@ def main():
             h = win["high"].to_numpy()
             l = win["low"].to_numpy()
             c = win["close"].to_numpy()
+            vol = win["volume"].to_numpy() if "volume" in win.columns else None
 
             # --- ATR + robust pivots via SciPy find_peaks (ATR-prominence) ---
             atr = compute_atr(h, l, c, period=atr_period, mode=atr_smoothing)
@@ -710,41 +824,49 @@ def main():
             if "head_and_shoulders" in active:
                 det_map["head_and_shoulders"] = detect_head_shoulders(
                     c,
+                    vol,
                     piv_hi,
                     eff_patterns.get("head_and_shoulders", {}),
                     atr_mean,
-                    prefer_atr
+                    prefer_atr,
+                    debug_log
                 )
 
             if "inverse_head_and_shoulders" in active:
                 det_map["inverse_head_and_shoulders"] = detect_inverse_head_shoulders(
                     c,
+                    vol,
                     piv_lo,
                     eff_patterns.get("inverse_head_and_shoulders", eff_patterns.get("head_and_shoulders", {})),
                     atr_mean,
-                    prefer_atr
+                    prefer_atr,
+                    debug_log
                 )
 
             # Robust Double Top / Bottom (ATR thresholds, duration, spacing, breakout, NMS)
             if "double_top" in active:
                 det_map["double_top"] = detect_double_top(
                     close=c,
+                    volume=vol,
                     piv_hi=piv_hi,
                     cfg_dt=eff_patterns.get("double_top", {}),
                     atr=atr,
                     prefer_atr=prefer_atr,
-                    labels_post=labels_post
+                    labels_post=labels_post,
+                    debug_log=debug_log
                 )
 
             if "double_bottom" in active:
                 cfg_db = deep_merge_dict(eff_patterns.get("double_top", {}), eff_patterns.get("double_bottom", {}))
                 det_map["double_bottom"] = detect_double_bottom(
                     close=c,
+                    volume=vol,
                     piv_lo=piv_lo,
                     cfg_db=cfg_db,
                     atr=atr,
                     prefer_atr=prefer_atr,
-                    labels_post=labels_post
+                    labels_post=labels_post,
+                    debug_log=debug_log
                 )
 
             # Descending triangle: geometry + image Hough gate
@@ -757,6 +879,9 @@ def main():
                 if tri_all:
                     if hough_desc_triangle_ok(png, tri_cfg):
                         tri_ok = tri_all
+                if tri_ok:
+                    centers = [{"icenter": int(0.5*(d["start"]+d["end"])), **d} for d in tri_ok]
+                    tri_ok = _nms_time(centers, int(labels_post.get("dedup_time_overlap_bars", 10)))
                 det_map["descending_triangle"] = tri_ok
 
             # --- presence flags and counts ---
@@ -847,6 +972,12 @@ def main():
     df = pd.DataFrame(rows).sort_values(by=["split","symbol","end_ts","image"])
     df.to_csv(out_csv, index=False)
     print(f"✅ Presence-labels CSV written: {out_csv} (rows={len(df)})")
+    if debug_log:
+        dbg_path = out_csv.with_suffix(".debug.jsonl")
+        with dbg_path.open("w", encoding="utf-8") as f:
+            for item in debug_log:
+                f.write(json.dumps(item) + "\n")
+        print(f"ℹ️ Debug log written: {dbg_path} (entries={len(debug_log)})")
 
 
 if __name__ == "__main__":

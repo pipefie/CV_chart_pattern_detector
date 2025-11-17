@@ -64,17 +64,20 @@ overrides:
     double_top:
       geometry:
         peak_height_similarity_pct: 6
-        valley_drop_min_pct: 0.015
+        valley_drop_min_pct: 0.012
       breakout:
         confirm:
-          threshold_percent: 0.35
-          within_bars: 8
+          threshold_percent: 0.15      # ~15 bps neck break for 1h large caps
+          threshold_atr: 0.35          # ATR floor to catch low-vol regimes
+          within_bars: 16              # confirm within a timely window
     double_bottom:
       geometry:
-        peak_rise_min_pct: 0.015
+        peak_rise_min_pct: 0.012
       breakout:
         confirm:
-          threshold_percent: 0.35
+          threshold_percent: 0.15
+          threshold_atr: 0.35
+          within_bars: 16
 
 patterns:
   # 1) Head & Shoulders family (2 classes)
@@ -84,10 +87,10 @@ patterns:
     geometry:
       required_peaks: 3
       order: "peak-valley-peak-valley-peak"
-      head_above_shoulders_min_atr: 0.8
-      head_above_shoulders_min_pct: 0.01
+      head_above_shoulders_min_atr: 0.55  # modest relaxation, still needs clear head
+      head_above_shoulders_min_pct: 0.007
       shoulder_height_similarity_pct: 25
-      shoulder_timing_similarity_pct: 40
+      shoulder_timing_similarity_pct: 60   # slightly broader timing window
       neckline:
         type: "line"
         max_slope_deg: 12
@@ -119,6 +122,10 @@ patterns:
     class_id: 1
     direction: "bullish"
     inherits: "head_and_shoulders"
+    geometry:
+      head_above_shoulders_min_atr: 0.45   # allow deeper heads typical of basing structures
+      head_above_shoulders_min_pct: 0.006
+      shoulder_timing_similarity_pct: 65   # broader timing symmetry on reversals
     breakout:
       side: "up"
       confirm:
@@ -138,9 +145,9 @@ patterns:
       peaks: 2
       peak_height_similarity_pct: 8      # tighter symmetry window
       valley_required: true
-      valley_drop_min_atr: 1.2           # require ≥1.2×ATR dip between peaks
-      valley_drop_min_pct: 0.012          # fallback if ATR not preferred
-      valley_min_bars_from_peaks: 4       # valley not glued to peaks
+      valley_drop_min_atr: 1.0           # allow modestly shallower dips
+      valley_drop_min_pct: 0.010          # fallback if ATR not preferred
+      valley_min_bars_from_peaks: 3       # slightly looser spacing
       max_pairs_per_peak: 5               # limit combinatorial explosions
       dynamic_thresholds:
         valley_drop_min_height_pct: 12    # 12% of pattern height as extra guard
@@ -160,7 +167,7 @@ patterns:
         type: "close_beyond_level"
         threshold_atr: 0.6          # close ≤ neckline − 0.6×ATR
         threshold_percent: 0.25      # fallback on % for low ATR regimes
-        within_bars: 12             # confirm swiftly after 2nd peak
+        within_bars: 16             # allow more time to confirm
     label_allow_pre_breakout: true
     # score choice if several candidates
     scoring:
@@ -181,8 +188,8 @@ patterns:
     direction: "bullish"
     inherits: "double_top"
     geometry:
-      peak_rise_min_atr: 0.8
-      peak_rise_min_pct: 0.008
+      peak_rise_min_atr: 1.0
+      peak_rise_min_pct: 0.010
       max_pairs_per_peak: 5
       dynamic_thresholds:
         valley_drop_min_height_pct: 12
@@ -194,7 +201,7 @@ patterns:
       require_confirmation: true
       confirm:
         type: "close_beyond_level"
-        threshold_percent: 0.12
+        threshold_percent: 0.15
     label_allow_pre_breakout: true
     trade_plan:
       stop:
@@ -216,7 +223,7 @@ patterns:
       duration:
         min_bars: 24
         max_bars: 200
-      apex_within_window_pct: 85
+        apex_within_window_pct: 85
     breakout:
       side: "down"
       confirm:
@@ -243,7 +250,7 @@ patterns:
       # slope constraints (in degrees):
       upper_max_deg: -5        # must be negative and ≤ -5°
       lower_abs_max_deg: 4     # near-flat lower line
-      min_support_lines: 3     # how many lines should support each sid
+      min_support_lines: 5     # require more line support to cut duplicates
 
   ascending_triangle:                     # ⚡️ explicit disabled twins
     enabled: false

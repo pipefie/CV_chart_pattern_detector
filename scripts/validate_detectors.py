@@ -116,6 +116,7 @@ def run_detectors(df: pd.DataFrame,
     h = df["high"].to_numpy()
     l = df["low"].to_numpy()
     c = df["close"].to_numpy()
+    v = df["volume"].to_numpy() if "volume" in df.columns else None
     atr = compute_atr(h, l, c, period=atr_period, mode=atr_smoothing)
 
     piv_hi = extract_pivots_with_prominence(
@@ -142,21 +143,22 @@ def run_detectors(df: pd.DataFrame,
     det_map = {name: [] for name in SUPPORTED}
     if eff_patterns.get("head_and_shoulders", {}).get("enabled", True):
         det_map["head_and_shoulders"] = detect_head_shoulders(
-            c, piv_hi, eff_patterns.get("head_and_shoulders", {}), np.nanmean(atr), prefer_atr
+            c, v, piv_hi, eff_patterns.get("head_and_shoulders", {}), np.nanmean(atr), prefer_atr
         )
     if eff_patterns.get("inverse_head_and_shoulders", {}).get("enabled", True):
         det_map["inverse_head_and_shoulders"] = detect_inverse_head_shoulders(
             c,
+            v,
             piv_lo,
             eff_patterns.get("inverse_head_and_shoulders", eff_patterns.get("head_and_shoulders", {})),
             np.nanmean(atr),
             prefer_atr,
         )
     if eff_patterns.get("double_top", {}).get("enabled", True):
-        det_map["double_top"] = detect_double_top(c, piv_hi, eff_patterns.get("double_top", {}), atr, prefer_atr, labels_post)
+        det_map["double_top"] = detect_double_top(c, v, piv_hi, eff_patterns.get("double_top", {}), atr, prefer_atr, labels_post)
     if eff_patterns.get("double_bottom", {}).get("enabled", True):
         cfg_db = deep_merge_dict(eff_patterns.get("double_top", {}), eff_patterns.get("double_bottom", {}))
-        det_map["double_bottom"] = detect_double_bottom(c, piv_lo, cfg_db, atr, prefer_atr, labels_post)
+        det_map["double_bottom"] = detect_double_bottom(c, v, piv_lo, cfg_db, atr, prefer_atr, labels_post)
     if eff_patterns.get("descending_triangle", {}).get("enabled", True):
         tri_cfg = eff_patterns.get("descending_triangle", {})
         det_map["descending_triangle"] = detect_triangle(c, piv_hi, piv_lo, tri_cfg.get("geometry", {}))
