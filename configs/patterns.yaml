@@ -114,6 +114,10 @@ patterns:
         rr_fallback: 2.0
       risk:
         pct_of_equity: 0.5
+    visual:
+      min_head_to_shoulder_ratio: 1.15
+      weight_symmetry: 0.8
+      weight_head_prominence: 1.2
 
   inverse_head_and_shoulders:
     class_id: 1
@@ -129,6 +133,10 @@ patterns:
       stop:
         mode: "swing_point"
         swing: "below_right_shoulder"
+    visual:
+      min_head_depth_ratio: 0.97
+      weight_symmetry: 0.7
+      weight_head_prominence: 1.1
 
   # 2) Double Top/Bottom family (2 classes)
   double_top:
@@ -175,6 +183,12 @@ patterns:
         swing: "above_second_peak"
       target:
         mode: "measured_move"
+    visual:
+      require_m_shape: true
+      max_valley_to_peak_ratio: 0.7
+      weight_peak_alignment: 1.3
+      weight_valley_depth: 0.7
+      weight_pattern_height: 0.9
 
   double_bottom:
     class_id: 3
@@ -200,6 +214,14 @@ patterns:
       stop:
         mode: "swing_point"
         swing: "below_second_bottom"
+    visual:
+      require_w_shape: true
+      min_trough_separation_bars: 8
+      max_trough_separation_bars: 65
+      min_peak_to_trough_ratio: 0.008
+      weight_trough_alignment: 1.2
+      weight_peak_rise: 0.6
+      weight_pattern_height: 0.8
 
   # 3) Descending Triangle (1 class; bullish twin not in this scope)
   descending_triangle:

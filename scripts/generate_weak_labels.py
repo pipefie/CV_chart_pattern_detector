@@ -29,6 +29,33 @@ def load_ohlcv(symbol: str) -> pd.DataFrame:
     df.index = df.index.tz_localize("UTC") if df.index.tz is None else df.index.tz_convert("UTC")
     return df
 
+def init_debug_log() -> list:
+    """Initialize an empty debug log"""
+    return []
+
+def log_debug_message(debug_log: list, pattern_type: str, reason: str, 
+                     details: dict = None, indices: tuple = None):
+    """Add a debug message to the log"""
+    if debug_log is not None:
+        entry = {
+            "pattern": pattern_type,
+            "reason": reason,
+            "timestamp": pd.Timestamp.now().isoformat()
+        }
+        if details:
+            entry.update(details)
+        if indices:
+            entry["indices"] = indices
+        debug_log.append(entry)
+
+def write_debug_log(debug_log: list, output_path: Path):
+    """Write debug log to JSONL file"""
+    if debug_log:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as f:
+            for entry in debug_log:
+                f.write(json.dumps(entry) + "\n")
+
 def slice_window(df: pd.DataFrame, start_iso: str, end_iso: str) -> pd.DataFrame:
     s = pd.Timestamp(start_iso); e = pd.Timestamp(end_iso)
     if s.tzinfo is None: s = s.tz_localize("UTC")
@@ -222,335 +249,891 @@ def _apply_dynamic_floor(base_abs: float,
         val = max(val, atr_mult * max(atr_recent, 1e-9))
     return val
 
-# --- Robust Double Top ---
-def detect_double_top(close: np.ndarray,
-                      piv_hi: list[tuple[int,float]],
-                      cfg_dt: dict,
-                      atr: np.ndarray,
-                      prefer_atr: bool,
-                      labels_post: dict | None = None) -> list[dict]:
-    out = []
-    atr_mean = float(np.nanmean(atr)) if len(atr) else 0.0
-    geom = (cfg_dt.get("geometry") or {})
-    dur  = geom.get("duration", {})
-    min_span = int(dur.get("min_bars", 16)); max_span = int(dur.get("max_bars", 120))
-    sim_tol  = float(geom.get("peak_height_similarity_pct", 15)) / 100.0
-    valley_sep = int(geom.get("valley_min_bars_from_peaks", 2))
-    max_pairs = max(1, int(geom.get("max_pairs_per_peak", 5)))
-
-    br = (cfg_dt.get("breakout") or {})
-    br_side = br.get("side", "down")
-    brc = (br.get("confirm") or {})
-    br_thr_atr = brc.get("threshold_atr", None)
-    br_thr_pct = brc.get("threshold_percent", None)
-    br_within  = brc.get("within_bars", None)
-    require_confirmation = bool(br.get("require_confirmation", True))
-    allow_pre_breakout = bool(cfg_dt.get("label_allow_pre_breakout", False))
-
-    sc = (cfg_dt.get("scoring") or {})
-    w_depth = float(sc.get("weight_valley_depth_atr", 1.0))
-    w_span  = float(sc.get("weight_span", 0.2))
-
-    dyn = (geom.get("dynamic_thresholds") or {})
-    dyn_lookback = int(dyn.get("vol_lookback_bars", 36))
-
-    def _recent_atr():
-        if len(atr) == 0:
-            return atr_mean
-        return float(np.nanmean(atr[-dyn_lookback:])) if dyn_lookback > 0 else atr_mean
-
-    piv_sorted = sorted(piv_hi, key=lambda t: t[0])
-    total = len(piv_sorted)
-    for idx1, (i1, p1) in enumerate(piv_sorted):
-        limit = min(total, idx1 + 1 + max_pairs)
-        for idx2 in range(idx1 + 1, limit):
-            i2, p2 = piv_sorted[idx2]
-            if i2 <= i1 + valley_sep:
-                continue
-            span = i2 - i1
-            if span < min_span or span > max_span: continue
-            mid = 0.5*(p1+p2)
-            if abs(p1 - p2)/max(1e-9, mid) > sim_tol:
-                continue
-            j0, j1 = i1 + valley_sep, i2 - valley_sep
-            if j1 <= j0: continue
-            local = close[j0:j1]
-            if len(local) == 0:
-                continue
-            v_idx = int(np.argmin(local) + j0)
-            v = float(close[v_idx])
-
-            base_need = _choose_abs_threshold(
-                geom.get("valley_drop_min_atr"),
-                geom.get("valley_drop_min_pct"),
-                atr_mean, mid, prefer_atr
-            )
-            pattern_height = max(p1, p2) - v
-            recent_atr = _recent_atr()
-            dyn_need = _apply_dynamic_floor(
-                base_need,
-                dyn,
-                pct_key="valley_drop_min_height_pct",
-                pattern_height=pattern_height,
-                price_ref=mid,
-                atr_recent=recent_atr
-            )
-            if (mid - v) < dyn_need:
-                continue
-
-            breakout_ok = True
-            if brc:
-                base_thr = _choose_abs_threshold(br_thr_atr, br_thr_pct, atr_mean, mid, prefer_atr)
-                thr_abs = _apply_dynamic_floor(
-                    base_thr,
-                    dyn,
-                    pct_key="breakout_height_pct",
-                    pattern_height=pattern_height,
-                    price_ref=mid,
-                    atr_recent=recent_atr
-                )
-                if br_within:
-                    future = close[i2+1 : i2+1 + br_within]
-                else:
-                    future = close[i2+1 :]
-                if len(future) == 0:
-                    continue
-                breakout_ok = _level_breakout_confirm(future, level=v, side=br_side, thr_abs=thr_abs, within_bars=br_within)
-            if not breakout_ok and require_confirmation and not allow_pre_breakout:
-                continue
-
-            ic = int(0.5*(i1+i2))
-            depth = (mid - v)/max(1e-9, atr_mean)
-            span_score = span / max(1.0, float(max_span))
-            score = w_depth * depth + w_span * span_score
-            out.append({"type":"double_top","i1":i1,"p1":p1,"i2":i2,"p2":p2,
-                        "ivalley":v_idx,"pvalley":v,"span":span,"score":float(score),
-                        "icenter":ic,"breakout_confirmed": bool(breakout_ok)})
-    dedup = int((labels_post or {}).get("dedup_time_overlap_bars", 10))
-    return _nms_time(out, dedup)
 
 # --- Robust Double Bottom ---
-def detect_double_bottom(close: np.ndarray,
-                         piv_lo: list[tuple[int,float]],
-                         cfg_db: dict,
-                         atr: np.ndarray,
-                         prefer_atr: bool,
-                         labels_post: dict | None = None) -> list[dict]:
+
+def detect_double_bottom_visual(close: np.ndarray,
+                               piv_lo: list,
+                               cfg_db: dict,
+                               atr: np.ndarray,
+                               prefer_atr: bool,
+                               labels_post: dict = None,
+                               debug_log: list = None) -> list[dict]:
+    """Enhanced double bottom detection focusing on visual 'W' shape"""
     out = []
     atr_mean = float(np.nanmean(atr)) if len(atr) else 0.0
-    geom = (cfg_db.get("geometry") or {})
-    dur  = geom.get("duration", {})
-    min_span = int(dur.get("min_bars", 16)); max_span = int(dur.get("max_bars", 120))
-    sim_tol  = float(geom.get("peak_height_similarity_pct", 15)) / 100.0
-    peak_sep = int(geom.get("valley_min_bars_from_peaks", 2))  # reuse name symmetrically
+    
+    geom = cfg_db.get("geometry", {})
+    visual_cfg = cfg_db.get("visual", {})
+    
+    dur = geom.get("duration", {})
+    min_span = int(dur.get("min_bars", 22))
+    max_span = int(dur.get("max_bars", 95))
+    
+    sim_tol = float(geom.get("peak_height_similarity_pct", 6)) / 100.0
+    peak_sep = int(geom.get("valley_min_bars_from_peaks", 2))
     max_pairs = max(1, int(geom.get("max_pairs_per_peak", 5)))
-
-    br = (cfg_db.get("breakout") or {})
-    br_side = br.get("side", "up")
-    brc = (br.get("confirm") or {})
-    br_thr_atr = brc.get("threshold_atr", None)
-    br_thr_pct = brc.get("threshold_percent", None)
-    br_within  = brc.get("within_bars", None)
+    
+    min_trough_sep = visual_cfg.get("min_trough_separation_bars", 8)
+    max_trough_sep = visual_cfg.get("max_trough_separation_bars", 65)
+    
+    br = cfg_db.get("breakout", {})
+    brc = br.get("confirm", {})
+    br_thr_atr = brc.get("threshold_atr")
+    br_thr_pct = brc.get("threshold_percent")
+    br_within = brc.get("within_bars")
     require_confirmation = bool(br.get("require_confirmation", True))
     allow_pre_breakout = bool(cfg_db.get("label_allow_pre_breakout", False))
-
-    sc = (cfg_db.get("scoring") or {})
-    w_rise = float(sc.get("weight_valley_depth_atr", 1.0))
-    w_span = float(sc.get("weight_span", 0.2))
-
-    dyn = (geom.get("dynamic_thresholds") or {})
+    
+    dyn = geom.get("dynamic_thresholds", {})
     dyn_lookback = int(dyn.get("vol_lookback_bars", 36))
 
     def _recent_atr():
-        if len(atr) == 0:
-            return atr_mean
+        if len(atr) == 0: return atr_mean
         return float(np.nanmean(atr[-dyn_lookback:])) if dyn_lookback > 0 else atr_mean
 
     piv_sorted = sorted(piv_lo, key=lambda t: t[0])
     total = len(piv_sorted)
+    
     for idx1, (i1, p1) in enumerate(piv_sorted):
         limit = min(total, idx1 + 1 + max_pairs)
         for idx2 in range(idx1 + 1, limit):
             i2, p2 = piv_sorted[idx2]
-            if i2 <= i1 + peak_sep:
+            
+            # Visual trough separation
+            trough_sep = i2 - i1
+            if trough_sep < min_trough_sep or trough_sep > max_trough_sep:
+                log_debug_message(debug_log, "double_bottom", "invalid_trough_separation",
+                                {"separation": trough_sep, "min_sep": min_trough_sep, "max_sep": max_trough_sep},
+                                (i1, i2))
                 continue
+                
+            if i2 <= i1 + peak_sep: 
+                log_debug_message(debug_log, "double_bottom", "troughs_too_close",
+                                {"peak_sep_required": peak_sep},
+                                (i1, i2))
+                continue
+            
             span = i2 - i1
-            if span < min_span or span > max_span: continue
-            mid = 0.5*(p1+p2)
-            if abs(p1 - p2)/max(1e-9, mid) > sim_tol:
+            if span < min_span or span > max_span:
+                log_debug_message(debug_log, "double_bottom", "invalid_span",
+                                {"span": span, "min_span": min_span, "max_span": max_span},
+                                (i1, i2))
                 continue
+            
+            # Visual trough alignment
+            mid_price = 0.5 * (p1 + p2)
+            height_diff_pct = abs(p1 - p2) / max(1e-9, mid_price)
+            if height_diff_pct > sim_tol:
+                log_debug_message(debug_log, "double_bottom", "trough_height_mismatch",
+                                {"height_diff_pct": height_diff_pct * 100, "max_allowed_pct": sim_tol * 100},
+                                (i1, i2))
+                continue
+
+            # Find peak for "W" shape
             j0, j1 = i1 + peak_sep, i2 - peak_sep
-            if j1 <= j0: continue
+            if j1 <= j0: 
+                log_debug_message(debug_log, "double_bottom", "invalid_peak_range",
+                                {"j0": j0, "j1": j1},
+                                (i1, i2))
+                continue
+            
             local = close[j0:j1]
-            if len(local) == 0:
+            if len(local) == 0: 
+                log_debug_message(debug_log, "double_bottom", "no_peak_data",
+                                {"j0": j0, "j1": j1},
+                                (i1, i2))
                 continue
+            
             peak_idx = int(np.argmax(local) + j0)
-            pk = float(close[peak_idx])
-
-            base_need = _choose_abs_threshold(
-                geom.get("peak_rise_min_atr"),
-                geom.get("peak_rise_min_pct"),
-                atr_mean, mid, prefer_atr
-            )
-            pattern_height = pk - min(p1, p2)
-            recent_atr = _recent_atr()
-            dyn_need = _apply_dynamic_floor(
-                base_need,
-                dyn,
-                pct_key="valley_drop_min_height_pct",
-                pattern_height=pattern_height,
-                price_ref=mid,
-                atr_recent=recent_atr
-            )
-            if (pk - mid) < dyn_need:
+            peak_price = float(close[peak_idx])
+            
+            # Visual peak height check
+            peak_ratio = (peak_price - mid_price) / mid_price
+            min_peak_ratio = visual_cfg.get("min_peak_to_trough_ratio", 0.008)
+            if peak_ratio < min_peak_ratio:
+                log_debug_message(debug_log, "double_bottom", "insufficient_peak_height",
+                                {"peak_ratio": peak_ratio, "min_required": min_peak_ratio},
+                                (i1, i2))
                 continue
-
+            
+            # Visual pattern height
+            pattern_height = peak_price - min(p1, p2)
+            min_pattern_height = geom.get("min_pattern_height_atr", 1.0) * atr_mean
+            if pattern_height < min_pattern_height:
+                log_debug_message(debug_log, "double_bottom", "insufficient_pattern_height",
+                                {"pattern_height": pattern_height, "min_required": min_pattern_height},
+                                (i1, i2))
+                continue
+            
+            # Validate "W" shape visually
+            w_shape_valid = False
+            if visual_cfg.get("require_w_shape", True):
+                w_shape_valid = _validate_w_shape(close, i1, i2, peak_idx, p1, p2, peak_price)
+            
+            if not w_shape_valid:
+                log_debug_message(debug_log, "double_bottom", "invalid_w_shape", {}, (i1, i2))
+                continue
+            
+            # Breakout confirmation
             breakout_ok = True
             if brc:
-                base_thr = _choose_abs_threshold(br_thr_atr, br_thr_pct, atr_mean, mid, prefer_atr)
+                base_thr = _choose_abs_threshold(br_thr_atr, br_thr_pct, atr_mean, mid_price, prefer_atr)
+                recent_atr_val = _recent_atr()
                 thr_abs = _apply_dynamic_floor(
-                    base_thr,
-                    dyn,
-                    pct_key="breakout_height_pct",
-                    pattern_height=pattern_height,
-                    price_ref=mid,
-                    atr_recent=recent_atr
+                    base_thr, dyn, "breakout_height_pct",
+                    pattern_height, mid_price, recent_atr_val
                 )
+                
                 if br_within:
                     future = close[i2+1 : i2+1 + br_within]
                 else:
-                    future = close[i2+1 :]
+                    future = close[i2+1:]
+                
                 if len(future) == 0:
+                    log_debug_message(debug_log, "double_bottom", "no_future_data", {}, (i1, i2))
                     continue
-                breakout_ok = _level_breakout_confirm(future, level=pk, side=br_side, thr_abs=thr_abs, within_bars=br_within)
+                
+                breakout_ok = _level_breakout_confirm(future, level=peak_price, side="up", 
+                                                     thr_abs=thr_abs, within_bars=br_within)
+            
             if not breakout_ok and require_confirmation and not allow_pre_breakout:
+                log_debug_message(debug_log, "double_bottom", "no_breakout_confirmation",
+                                {"threshold": thr_abs, "within_bars": br_within},
+                                (i1, i2))
                 continue
 
-            ic = int(0.5*(i1+i2))
-            rise = (pk - mid)/max(1e-9, atr_mean)
-            span_score = span / max(1.0, float(max_span))
-            score = w_rise * rise + w_span * span_score
-            out.append({"type":"double_bottom","i1":i1,"p1":p1,"i2":i2,"p2":p2,
-                        "ipeak":peak_idx,"ppeak":pk,"span":span,"score":float(score),
-                        "icenter":ic,"breakout_confirmed": bool(breakout_ok)})
+            # Visual scoring
+            score = _score_double_bottom_visual(p1, p2, peak_price, i1, i2, span, visual_cfg)
+            
+            out.append({
+                "type": "double_bottom", "i1": i1, "p1": p1, "i2": i2, "p2": p2,
+                "ipeak": peak_idx, "ppeak": peak_price, "span": span, "score": score,
+                "icenter": int(0.5*(i1+i2)), "breakout_confirmed": bool(breakout_ok)
+            })
+    
     dedup = int((labels_post or {}).get("dedup_time_overlap_bars", 10))
     return _nms_time(out, dedup)
 
-def detect_head_shoulders(closes: np.ndarray,
-                          piv_hi: list[tuple[int,float]],
-                          cfg: dict,
-                          atr_mean: float,
-                          prefer_atr: bool) -> list[dict]:
-    """Classic H&S: three highs with middle > shoulders + rough time symmetry."""
+def _validate_w_shape(close: np.ndarray, i1: int, i2: int, peak_idx: int, p1: float, p2: float, peak_price: float) -> bool:
+    """Validate visual 'W' shape characteristics"""
+    # Check that prices ascend into peak and descend out
+    left_ascend_count = 0
+    right_descend_count = 0
+    
+    # Check left side (i1 to peak_idx)
+    if peak_idx - i1 > 1:
+        for i in range(i1, peak_idx-1):
+            if close[i] <= close[i+1]:
+                left_ascend_count += 1
+    
+    # Check right side (peak_idx to i2)  
+    if i2 - peak_idx > 1:
+        for i in range(peak_idx, i2-1):
+            if close[i] >= close[i+1]:
+                right_descend_count += 1
+    
+    left_ratio = left_ascend_count / max(1, (peak_idx - i1 - 1))
+    right_ratio = right_descend_count / max(1, (i2 - peak_idx - 1))
+    
+    return left_ratio > 0.6 and right_ratio > 0.6
+
+def _score_double_bottom_visual(p1: float, p2: float, peak_price: float, i1: int, i2: int, span: int, visual_cfg: dict) -> float:
+    """Score double bottom based on visual quality"""
+    score = 0.0
+    
+    # Trough alignment score
+    trough_similarity = 1.0 - (abs(p1 - p2) / max(p1, p2))
+    score += trough_similarity * visual_cfg.get("weight_trough_alignment", 1.2)
+    
+    # Peak rise score
+    mid_price = 0.5 * (p1 + p2)
+    peak_rise = (peak_price - mid_price) / mid_price
+    score += min(peak_rise * 25, 1.0) * visual_cfg.get("weight_peak_rise", 0.6)
+    
+    # Pattern height score
+    pattern_height = peak_price - min(p1, p2)
+    height_score = min(pattern_height / (mid_price * 0.08), 1.0)
+    score += height_score * visual_cfg.get("weight_pattern_height", 0.8)
+    
+    return score / 3.0
+
+# --- VISUAL Head & Shoulders Detection ---
+# --- COMPLETE VISUAL Head & Shoulders Detection ---
+def detect_head_shoulders_visual(closes: np.ndarray,
+                                piv_hi: list,
+                                piv_lo: list,
+                                cfg: dict,
+                                atr_mean: float,
+                                prefer_atr: bool,
+                                debug_log: list = None) -> list[dict]:
+    """Enhanced H&S detection focusing on visual characteristics"""
     out = []
     geom = cfg.get("geometry", {})
-    sym_pct = float(geom.get("shoulder_timing_similarity_pct", 40)) / 100.0
-    dur     = geom.get("duration", {})
-    min_span = int(dur.get("min_bars", 20)); max_span = int(dur.get("max_bars", 120))
-    shoulder_sim = float(geom.get("shoulder_height_similarity_pct", 25)) / 100.0
+    visual_cfg = cfg.get("visual", {})
+    
+    # Visual constraints
+    shoulder_sim = float(geom.get("shoulder_height_similarity_pct", 35)) / 100.0
+    timing_sim = float(geom.get("shoulder_timing_similarity_pct", 70)) / 100.0
+    min_head_ratio = float(visual_cfg.get("min_head_to_shoulder_ratio", 1.15))
+    
+    dur = geom.get("duration", {})
+    min_span = int(dur.get("min_bars", 30))
+    max_span = int(dur.get("max_bars", 200))
+    
     piv_sorted = sorted(piv_hi, key=lambda t: t[0])
+    
     for iL, pL in piv_sorted:
         for iH, pH in piv_sorted:
-            if iH <= iL + 2: continue
+            if iH <= iL + 2: 
+                continue
             for iR, pR in piv_sorted:
-                if iR <= iH + 2: continue
-                span = iR - iL
-                if span < min_span or span > max_span: continue
-                sh_avg = 0.5*(pL+pR)
-                if abs(pL - pR)/max(1e-9, sh_avg) > shoulder_sim:
+                if iR <= iH + 2: 
                     continue
+                
+                span = iR - iL
+                if span < min_span or span > max_span:
+                    log_debug_message(debug_log, "head_and_shoulders", "invalid_span", 
+                                    {"span": span, "min_span": min_span, "max_span": max_span},
+                                    (iL, iH, iR))
+                    continue
+                
+                # Visual symmetry check
+                shoulder_avg = 0.5 * (pL + pR)
+                if abs(pL - pR) / max(1e-9, shoulder_avg) > shoulder_sim:
+                    log_debug_message(debug_log, "head_and_shoulders", "shoulder_height_asymmetry",
+                                    {"height_diff_pct": abs(pL - pR) / shoulder_avg * 100},
+                                    (iL, iH, iR))
+                    continue
+                
+                # Visual head prominence
                 head_need = _choose_abs_threshold(
                     geom.get("head_above_shoulders_min_atr"),
                     geom.get("head_above_shoulders_min_pct"),
-                    atr_mean,
-                    sh_avg,
-                    prefer_atr
+                    atr_mean, shoulder_avg, prefer_atr
                 )
-                if (pH - sh_avg) < max(head_need, 0.01 * sh_avg):
+                
+                # Enhanced visual check: head must be clearly taller
+                head_to_shoulder_ratio = pH / shoulder_avg
+                head_prominence = pH - shoulder_avg
+                
+                if (head_prominence < head_need) or (head_to_shoulder_ratio < min_head_ratio):
+                    log_debug_message(debug_log, "head_and_shoulders", "insufficient_head_prominence",
+                                    {"head_prominence": head_prominence, "required": head_need,
+                                     "head_ratio": head_to_shoulder_ratio, "min_ratio": min_head_ratio},
+                                    (iL, iH, iR))
                     continue
-                ideal = 0.5*(iL+iH)
-                tol_bars = max(1, int(sym_pct * span))
-                if abs(iR - ideal) > tol_bars: continue
-                out.append({"type":"head_shoulders","iL":iL,"pL":pL,"iH":iH,"pH":pH,"iR":iR,"pR":pR})
+                
+                # Visual timing symmetry
+                ideal_right_pos = iL + 2 * (iH - iL) / 3  # Right shoulder at 2/3 position
+                tol_bars = max(3, int(timing_sim * span))
+                if abs(iR - ideal_right_pos) > tol_bars:
+                    log_debug_message(debug_log, "head_and_shoulders", "timing_asymmetry",
+                                    {"actual_pos": iR, "ideal_pos": ideal_right_pos, "tolerance": tol_bars},
+                                    (iL, iH, iR))
+                    continue
+                
+                # Find neckline points (troughs between shoulders)
+                neckline_points = []
+                # Left trough between left shoulder and head
+                if iL + 1 < iH:
+                    left_trough_range = closes[iL+1:iH]
+                    if len(left_trough_range) > 0:
+                        left_trough_idx = iL + 1 + np.argmin(left_trough_range)
+                        neckline_points.append((left_trough_idx, closes[left_trough_idx]))
+                
+                # Right trough between head and right shoulder  
+                if iH + 1 < iR:
+                    right_trough_range = closes[iH+1:iR]
+                    if len(right_trough_range) > 0:
+                        right_trough_idx = iH + 1 + np.argmin(right_trough_range)
+                        neckline_points.append((right_trough_idx, closes[right_trough_idx]))
+                
+                # Validate neckline visually
+                neckline_valid = False
+                if len(neckline_points) >= 2:
+                    neckline_valid = _validate_neckline_visual(neckline_points, geom.get("neckline", {}))
+                
+                if not neckline_valid:
+                    log_debug_message(debug_log, "head_and_shoulders", "invalid_neckline",
+                                    {"neckline_points": len(neckline_points)},
+                                    (iL, iH, iR))
+                    continue
+                
+                score = _score_hs_visual(pL, pH, pR, iL, iH, iR, span, visual_cfg)
+                
+                out.append({
+                    "type": "head_and_shoulders", 
+                    "iL": iL, "pL": pL, "iH": iH, "pH": pH, "iR": iR, "pR": pR,
+                    "score": score, "icenter": iH,
+                    "neckline_points": neckline_points
+                })
+    
     return out
 
-def detect_inverse_head_shoulders(closes: np.ndarray,
-                                  piv_lo: list[tuple[int,float]],
-                                  cfg: dict,
-                                  atr_mean: float,
-                                  prefer_atr: bool) -> list[dict]:
-    """Inverse H&S: three lows with middle (head) lower than shoulders + rough time symmetry."""
+def _validate_neckline_visual(neckline_points: list, neckline_cfg: dict) -> bool:
+    """Validate neckline visual characteristics"""
+    if len(neckline_points) < 2:
+        return False
+    
+    indices = np.array([p[0] for p in neckline_points])
+    prices = np.array([p[1] for p in neckline_points])
+    
+    # Fit line
+    if len(indices) >= 2:
+        slope, intercept = np.polyfit(indices, prices, 1)
+        predicted = slope * indices + intercept
+        residuals = np.abs(prices - predicted)
+        
+        # Check line fit quality
+        max_rmsd = neckline_cfg.get("max_rmsd_pct_of_height", 0.35)
+        price_range = np.max(prices) - np.min(prices)
+        if price_range > 0 and np.mean(residuals) / price_range > max_rmsd:
+            return False
+        
+        # Check slope
+        max_slope_deg = neckline_cfg.get("max_slope_deg", 10)
+        # Calculate approximate slope in degrees (simplified)
+        if len(indices) > 1:
+            x_range = indices[-1] - indices[0]
+            if x_range > 0:
+                slope_deg = math.degrees(math.atan(slope * x_range / max(price_range, 1e-9)))
+                if abs(slope_deg) > max_slope_deg:
+                    return False
+    
+    return True
+
+def _score_hs_visual(pL: float, pH: float, pR: float, iL: int, iH: int, iR: int, span: int, visual_cfg: dict) -> float:
+    """Score H&S pattern based on visual quality"""
+    score = 0.0
+    
+    # Symmetry score
+    shoulder_symmetry = 1.0 - (abs(pL - pR) / max(pL, pR))
+    score += shoulder_symmetry * visual_cfg.get("weight_symmetry", 0.8)
+    
+    # Head prominence score
+    shoulder_avg = 0.5 * (pL + pR)
+    head_prominence = (pH - shoulder_avg) / shoulder_avg
+    score += min(head_prominence * 10, 1.0) * visual_cfg.get("weight_head_prominence", 1.2)
+    
+    # Timing symmetry score
+    ideal_right_pos = iL + 2 * (iH - iL) / 3
+    timing_symmetry = 1.0 - min(abs(iR - ideal_right_pos) / (span * 0.5), 1.0)
+    score += timing_symmetry * visual_cfg.get("weight_symmetry", 0.8)
+    
+    return score / 3.0  # Normalize
+
+# --- VISUAL Double Top Detection ---
+# --- COMPLETE VISUAL Double Top Detection ---
+def detect_double_top_visual(close: np.ndarray,
+                            piv_hi: list,
+                            cfg_dt: dict,
+                            atr: np.ndarray,
+                            prefer_atr: bool,
+                            labels_post: dict = None,
+                            debug_log: list = None) -> list[dict]:
+    """Enhanced double top detection focusing on visual 'M' shape"""
+    out = []
+    atr_mean = float(np.nanmean(atr)) if len(atr) else 0.0
+    
+    geom = cfg_dt.get("geometry", {})
+    visual_cfg = cfg_dt.get("visual", {})
+    
+    dur = geom.get("duration", {})
+    min_span = int(dur.get("min_bars", 20))
+    max_span = int(dur.get("max_bars", 90))
+    
+    sim_tol = float(geom.get("peak_height_similarity_pct", 5)) / 100.0
+    valley_sep = int(geom.get("valley_min_bars_from_peaks", 2))
+    max_pairs = max(1, int(geom.get("max_pairs_per_peak", 4)))
+    
+    min_peak_sep = geom.get("min_peak_separation_bars", 10)
+    max_peak_sep = geom.get("max_peak_separation_bars", 60)
+    
+    br = cfg_dt.get("breakout", {})
+    brc = br.get("confirm", {})
+    br_thr_atr = brc.get("threshold_atr")
+    br_thr_pct = brc.get("threshold_percent")
+    br_within = brc.get("within_bars")
+    require_confirmation = bool(br.get("require_confirmation", True))
+    allow_pre_breakout = bool(cfg_dt.get("label_allow_pre_breakout", False))
+    
+    dyn = geom.get("dynamic_thresholds", {})
+    dyn_lookback = int(dyn.get("vol_lookback_bars", 36))
+
+    def _recent_atr():
+        if len(atr) == 0: return atr_mean
+        return float(np.nanmean(atr[-dyn_lookback:])) if dyn_lookback > 0 else atr_mean
+
+    piv_sorted = sorted(piv_hi, key=lambda t: t[0])
+    total = len(piv_sorted)
+    
+    for idx1, (i1, p1) in enumerate(piv_sorted):
+        limit = min(total, idx1 + 1 + max_pairs)
+        for idx2 in range(idx1 + 1, limit):
+            i2, p2 = piv_sorted[idx2]
+            
+            # Visual peak separation
+            peak_sep = i2 - i1
+            if peak_sep < min_peak_sep or peak_sep > max_peak_sep:
+                log_debug_message(debug_log, "double_top", "invalid_peak_separation",
+                                {"separation": peak_sep, "min_sep": min_peak_sep, "max_sep": max_peak_sep},
+                                (i1, i2))
+                continue
+                
+            if i2 <= i1 + valley_sep: 
+                log_debug_message(debug_log, "double_top", "peaks_too_close", 
+                                {"valley_sep_required": valley_sep},
+                                (i1, i2))
+                continue
+            
+            span = i2 - i1
+            if span < min_span or span > max_span:
+                log_debug_message(debug_log, "double_top", "invalid_span",
+                                {"span": span, "min_span": min_span, "max_span": max_span},
+                                (i1, i2))
+                continue
+            
+            # Visual peak alignment
+            mid_price = 0.5 * (p1 + p2)
+            height_diff_pct = abs(p1 - p2) / max(1e-9, mid_price)
+            if height_diff_pct > sim_tol:
+                log_debug_message(debug_log, "double_top", "peak_height_mismatch",
+                                {"height_diff_pct": height_diff_pct * 100, "max_allowed_pct": sim_tol * 100},
+                                (i1, i2))
+                continue
+
+            # Find valley for "M" shape
+            j0, j1 = i1 + valley_sep, i2 - valley_sep
+            if j1 <= j0: 
+                log_debug_message(debug_log, "double_top", "invalid_valley_range",
+                                {"j0": j0, "j1": j1},
+                                (i1, i2))
+                continue
+            
+            local = close[j0:j1]
+            if len(local) == 0: 
+                log_debug_message(debug_log, "double_top", "no_valley_data",
+                                {"j0": j0, "j1": j1},
+                                (i1, i2))
+                continue
+            
+            v_idx = int(np.argmin(local) + j0)
+            v_price = float(close[v_idx])
+            
+            # Visual valley depth check
+            valley_ratio = (mid_price - v_price) / mid_price
+            min_valley_ratio = visual_cfg.get("max_valley_to_peak_ratio", 0.7)
+            if valley_ratio < min_valley_ratio:
+                log_debug_message(debug_log, "double_top", "insufficient_valley_depth",
+                                {"valley_ratio": valley_ratio, "min_required": min_valley_ratio},
+                                (i1, i2))
+                continue
+            
+            # Visual pattern height
+            pattern_height = max(p1, p2) - v_price
+            min_pattern_height = geom.get("min_pattern_height_atr", 1.2) * atr_mean
+            if pattern_height < min_pattern_height:
+                log_debug_message(debug_log, "double_top", "insufficient_pattern_height",
+                                {"pattern_height": pattern_height, "min_required": min_pattern_height},
+                                (i1, i2))
+                continue
+            
+            # Validate "M" shape visually
+            m_shape_valid = False
+            if visual_cfg.get("require_m_shape", True):
+                m_shape_valid = _validate_m_shape(close, i1, i2, v_idx, p1, p2, v_price)
+            
+            if not m_shape_valid:
+                log_debug_message(debug_log, "double_top", "invalid_m_shape", {}, (i1, i2))
+                continue
+            
+            # Breakout confirmation
+            breakout_ok = True
+            if brc:
+                base_thr = _choose_abs_threshold(br_thr_atr, br_thr_pct, atr_mean, mid_price, prefer_atr)
+                recent_atr_val = _recent_atr()
+                thr_abs = _apply_dynamic_floor(
+                    base_thr, dyn, "breakout_height_pct",
+                    pattern_height, mid_price, recent_atr_val
+                )
+                
+                if br_within:
+                    future = close[i2+1 : i2+1 + br_within]
+                else:
+                    future = close[i2+1:]
+                
+                if len(future) == 0:
+                    log_debug_message(debug_log, "double_top", "no_future_data", {}, (i1, i2))
+                    continue
+                
+                breakout_ok = _level_breakout_confirm(future, level=v_price, side="down", 
+                                                     thr_abs=thr_abs, within_bars=br_within)
+            
+            if not breakout_ok and require_confirmation and not allow_pre_breakout:
+                log_debug_message(debug_log, "double_top", "no_breakout_confirmation",
+                                {"threshold": thr_abs, "within_bars": br_within},
+                                (i1, i2))
+                continue
+
+            # Visual scoring
+            score = _score_double_top_visual(p1, p2, v_price, i1, i2, span, visual_cfg)
+            
+            out.append({
+                "type": "double_top", "i1": i1, "p1": p1, "i2": i2, "p2": p2,
+                "ivalley": v_idx, "pvalley": v_price, "span": span, "score": score,
+                "icenter": int(0.5*(i1+i2)), "breakout_confirmed": bool(breakout_ok)
+            })
+    
+    dedup = int((labels_post or {}).get("dedup_time_overlap_bars", 10))
+    return _nms_time(out, dedup)
+
+def _validate_m_shape(close: np.ndarray, i1: int, i2: int, v_idx: int, p1: float, p2: float, v_price: float) -> bool:
+    """Validate visual 'M' shape characteristics"""
+    # Check that prices descend into valley and ascend out
+    left_descend_count = 0
+    right_ascend_count = 0
+    
+    # Check left side (i1 to v_idx)
+    if v_idx - i1 > 1:
+        for i in range(i1, v_idx-1):
+            if close[i] >= close[i+1]:
+                left_descend_count += 1
+    
+    # Check right side (v_idx to i2)  
+    if i2 - v_idx > 1:
+        for i in range(v_idx, i2-1):
+            if close[i] <= close[i+1]:
+                right_ascend_count += 1
+    
+    left_ratio = left_descend_count / max(1, (v_idx - i1 - 1))
+    right_ratio = right_ascend_count / max(1, (i2 - v_idx - 1))
+    
+    return left_ratio > 0.6 and right_ratio > 0.6
+
+def _score_double_top_visual(p1: float, p2: float, v_price: float, i1: int, i2: int, span: int, visual_cfg: dict) -> float:
+    """Score double top based on visual quality"""
+    score = 0.0
+    
+    # Peak alignment score
+    peak_similarity = 1.0 - (abs(p1 - p2) / max(p1, p2))
+    score += peak_similarity * visual_cfg.get("weight_peak_alignment", 1.3)
+    
+    # Valley depth score
+    mid_price = 0.5 * (p1 + p2)
+    valley_depth = (mid_price - v_price) / mid_price
+    score += min(valley_depth * 20, 1.0) * visual_cfg.get("weight_valley_depth", 0.7)
+    
+    # Pattern height score
+    pattern_height = max(p1, p2) - v_price
+    height_score = min(pattern_height / (mid_price * 0.1), 1.0)
+    score += height_score * visual_cfg.get("weight_pattern_height", 0.9)
+    
+    return score / 3.0
+
+# --- VISUAL Inverse Head & Shoulders Detection ---
+# --- COMPLETE VISUAL Inverse Head & Shoulders Detection ---
+def detect_inverse_head_shoulders_visual(closes: np.ndarray,
+                                        piv_lo: list,
+                                        piv_hi: list,
+                                        cfg: dict,
+                                        atr_mean: float,
+                                        prefer_atr: bool,
+                                        debug_log: list = None) -> list[dict]:
+    """Enhanced inverse H&S detection focusing on visual 'W' shape characteristics"""
     out = []
     geom = cfg.get("geometry", {})
-    sym_pct = float(geom.get("shoulder_timing_similarity_pct", 40)) / 100.0
-    dur     = geom.get("duration", {})
-    min_span = int(dur.get("min_bars", 20)); max_span = int(dur.get("max_bars", 120))
-    shoulder_sim = float(geom.get("shoulder_height_similarity_pct", 25)) / 100.0
+    visual_cfg = cfg.get("visual", {})
+    
+    # Visual constraints (different from regular H&S)
+    shoulder_sim = float(geom.get("shoulder_height_similarity_pct", 40)) / 100.0
+    timing_sim = float(geom.get("shoulder_timing_similarity_pct", 75)) / 100.0
+    min_head_ratio = float(visual_cfg.get("min_head_depth_ratio", 0.97))
+    
+    dur = geom.get("duration", {})
+    min_span = int(dur.get("min_bars", 35))
+    max_span = int(dur.get("max_bars", 220))
+    
     piv_sorted = sorted(piv_lo, key=lambda t: t[0])
+    
     for iL, pL in piv_sorted:
         for iH, pH in piv_sorted:
-            if iH <= iL + 2: continue
+            if iH <= iL + 3: 
+                continue
             for iR, pR in piv_sorted:
-                if iR <= iH + 2: continue
-                span = iR - iL
-                if span < min_span or span > max_span: continue
-                sh_avg = 0.5*(pL+pR)
-                if abs(pL - pR)/max(1e-9, sh_avg) > shoulder_sim:
+                if iR <= iH + 3: 
                     continue
+                
+                span = iR - iL
+                if span < min_span or span > max_span:
+                    log_debug_message(debug_log, "inverse_head_and_shoulders", "invalid_span",
+                                    {"span": span, "min_span": min_span, "max_span": max_span},
+                                    (iL, iH, iR))
+                    continue
+                
+                # Visual symmetry check
+                shoulder_avg = 0.5 * (pL + pR)
+                if abs(pL - pR) / max(1e-9, shoulder_avg) > shoulder_sim:
+                    log_debug_message(debug_log, "inverse_head_and_shoulders", "shoulder_height_asymmetry",
+                                    {"height_diff_pct": abs(pL - pR) / shoulder_avg * 100},
+                                    (iL, iH, iR))
+                    continue
+                
+                # Visual head depth (head should be clearly lower)
                 head_need = _choose_abs_threshold(
                     geom.get("head_above_shoulders_min_atr"),
-                    geom.get("head_above_shoulders_min_pct"),
-                    atr_mean,
-                    sh_avg,
-                    prefer_atr
+                    geom.get("head_above_shoulders_min_pct"), 
+                    atr_mean, shoulder_avg, prefer_atr
                 )
-                if (sh_avg - pH) < max(head_need, 0.01 * sh_avg):
+                
+                # For inverse, head should be BELOW shoulders
+                head_depth = shoulder_avg - pH
+                head_to_shoulder_ratio = pH / shoulder_avg
+                
+                if head_depth < head_need or head_to_shoulder_ratio > min_head_ratio:
+                    log_debug_message(debug_log, "inverse_head_and_shoulders", "insufficient_head_depth",
+                                    {"head_depth": head_depth, "required": head_need,
+                                     "head_ratio": head_to_shoulder_ratio, "max_ratio": min_head_ratio},
+                                    (iL, iH, iR))
                     continue
-                ideal = 0.5*(iL+iH)
-                tol_bars = max(1, int(sym_pct * span))
-                if abs(iR - ideal) > tol_bars: continue
-                out.append({"type":"inverse_head_shoulders","iL":iL,"pL":pL,"iH":iH,"pH":pH,"iR":iR,"pR":pR})
+                
+                # Visual timing symmetry
+                ideal_right_pos = iL + (iH - iL) * 0.6
+                tol_bars = max(4, int(timing_sim * span))
+                if abs(iR - ideal_right_pos) > tol_bars:
+                    log_debug_message(debug_log, "inverse_head_and_shoulders", "timing_asymmetry",
+                                    {"actual_pos": iR, "ideal_pos": ideal_right_pos, "tolerance": tol_bars},
+                                    (iL, iH, iR))
+                    continue
+                
+                # Find neckline points (highs between shoulders)
+                neckline_points = []
+                # Left peak between left shoulder and head
+                if iL + 1 < iH:
+                    left_peak_range = closes[iL+1:iH]
+                    if len(left_peak_range) > 0:
+                        left_peak_idx = iL + 1 + np.argmax(left_peak_range)
+                        neckline_points.append((left_peak_idx, closes[left_peak_idx]))
+                
+                # Right peak between head and right shoulder  
+                if iH + 1 < iR:
+                    right_peak_range = closes[iH+1:iR]
+                    if len(right_peak_range) > 0:
+                        right_peak_idx = iH + 1 + np.argmax(right_peak_range)
+                        neckline_points.append((right_peak_idx, closes[right_peak_idx]))
+                
+                # Validate neckline visually
+                neckline_valid = False
+                if len(neckline_points) >= 2:
+                    neckline_valid = _validate_neckline_visual(neckline_points, geom.get("neckline", {}))
+                
+                if not neckline_valid:
+                    log_debug_message(debug_log, "inverse_head_and_shoulders", "invalid_neckline",
+                                    {"neckline_points": len(neckline_points)},
+                                    (iL, iH, iR))
+                    continue
+                
+                score = _score_inverse_hs_visual(pL, pH, pR, iL, iH, iR, span, visual_cfg)
+                
+                out.append({
+                    "type": "inverse_head_and_shoulders", 
+                    "iL": iL, "pL": pL, "iH": iH, "pH": pH, "iR": iR, "pR": pR,
+                    "score": score, "icenter": iH,
+                    "neckline_points": neckline_points
+                })
+    
     return out
 
-def detect_triangle(closes: np.ndarray, piv_hi: list[tuple[int,float]], piv_lo: list[tuple[int,float]], cfg_geom: dict) -> list[dict]:
-    """Generic converging upper/lower envelopes."""
+def _score_inverse_hs_visual(pL: float, pH: float, pR: float, iL: int, iH: int, iR: int, span: int, visual_cfg: dict) -> float:
+    """Score inverse H&S pattern based on visual quality"""
+    score = 0.0
+    
+    # Symmetry score (more relaxed)
+    shoulder_symmetry = 1.0 - (abs(pL - pR) / max(pL, pR))
+    score += shoulder_symmetry * visual_cfg.get("weight_symmetry", 0.7)
+    
+    # Head depth score
+    shoulder_avg = 0.5 * (pL + pR)
+    head_depth = (shoulder_avg - pH) / shoulder_avg
+    score += min(head_depth * 15, 1.0) * visual_cfg.get("weight_head_prominence", 1.1)
+    
+    # Timing symmetry score
+    ideal_right_pos = iL + (iH - iL) * 0.6
+    timing_symmetry = 1.0 - min(abs(iR - ideal_right_pos) / (span * 0.6), 1.0)
+    score += timing_symmetry * visual_cfg.get("weight_symmetry", 0.7)
+    
+    # Base formation score
+    base_score = min(span / 80.0, 1.0)
+    score += base_score * 0.5
+    
+    return score / 3.5
+
+# --- VISUAL Descending Triangle Detection ---
+def detect_descending_triangle_visual(close: np.ndarray,
+                                     piv_hi: list,
+                                     piv_lo: list,
+                                     cfg_tri: dict,
+                                     atr_mean: float,
+                                     img_path: Path = None,
+                                     debug_log: list = None) -> list[dict]:
+    """Enhanced descending triangle detection with visual convergence validation"""
     out = []
-    min_tu = int(cfg_geom.get("upper_trendline", {}).get("min_touches", 3))
-    min_tl = int(cfg_geom.get("lower_boundary", {}).get("min_touches", 3))
-    tol_rel = float(cfg_geom.get("envelope_tol_rel", 0.004))
-    conv_min = float(cfg_geom.get("convergence_min_rel", 0.01))
-    dur = cfg_geom.get("duration", {})
-    min_span = int(dur.get("min_bars", 30)); max_span = int(dur.get("max_bars", 160))
-    if len(piv_hi) < min_tu or len(piv_lo) < min_tl: return out
-    for s in range(0, len(closes) - min_span):
-        e = min(len(closes)-1, s + max_span)
-        if e - s < min_span: continue
-        hi = [(i,p) for (i,p) in piv_hi if s <= i <= e]
-        lo = [(i,p) for (i,p) in piv_lo if s <= i <= e]
-        if len(hi) < min_tu or len(lo) < min_tl: continue
-        xi_hi = np.array([i for (i,_) in hi]); yi_hi = np.array([p for (_,p) in hi])
-        xi_lo = np.array([i for (i,_) in lo]); yi_lo = np.array([p for (_,p) in lo])
-        a_hi, b_hi = np.polyfit(xi_hi, yi_hi, 1)
-        a_lo, b_lo = np.polyfit(xi_lo, yi_lo, 1)
-        gap_s = (a_hi*s + b_hi) - (a_lo*s + b_lo)
-        gap_e = (a_hi*e + b_hi) - (a_lo*e + b_lo)
-        mid = 0.5*((a_hi*s+b_hi) + (a_lo*s+b_lo))
-        if mid == 0: continue
-        if (gap_s - gap_e)/abs(mid) < conv_min: continue
-        ok_hi = np.mean(np.abs(yi_hi - (a_hi*xi_hi+b_hi))/np.maximum(1e-9, np.abs(yi_hi))) < tol_rel
-        ok_lo = np.mean(np.abs(yi_lo - (a_lo*xi_lo+b_lo))/np.maximum(1e-9, np.abs(yi_lo))) < tol_rel
-        if not (ok_hi and ok_lo): continue
-        out.append({"type":"triangle","start":s,"end":e,"a_hi":float(a_hi),"b_hi":float(b_hi),"a_lo":float(a_lo),"b_lo":float(b_lo)})
+    geom = cfg_tri.get("geometry", {})
+    visual_cfg = cfg_tri.get("visual", {})
+    hough_cfg = cfg_tri.get("hough", {})
+    
+    dur = geom.get("duration", {})
+    min_span = int(dur.get("min_bars", 25))
+    max_span = int(dur.get("max_bars", 150))
+    
+    upper_cfg = geom.get("upper_trendline", {})
+    lower_cfg = geom.get("lower_boundary", {})
+    
+    min_upper_touches = upper_cfg.get("min_touches", 3)
+    min_lower_touches = lower_cfg.get("min_touches", 2)
+    max_gap_bars = upper_cfg.get("max_gap_bars", 10)
+    
+    # Visual convergence requirements
+    min_convergence = visual_cfg.get("min_convergence_ratio", 0.3)
+    min_contraction = visual_cfg.get("min_contraction_pct", 25) / 100.0
+    
+    if len(piv_hi) < min_upper_touches or len(piv_lo) < min_lower_touches:
+        return out
+    
+    # Sort pivots by time
+    hi_sorted = sorted(piv_hi, key=lambda x: x[0])
+    lo_sorted = sorted(piv_lo, key=lambda x: x[0])
+    
+    # Look for descending upper line (lower highs)
+    for i in range(len(hi_sorted) - min_upper_touches + 1):
+        upper_points = hi_sorted[i:i + min_upper_touches]
+        
+        # Check if highs are generally descending
+        upper_indices = [p[0] for p in upper_points]
+        upper_prices = [p[1] for p in upper_points]
+        
+        # Fit upper trendline
+        if len(upper_indices) >= 2:
+            upper_slope, upper_intercept = np.polyfit(upper_indices, upper_prices, 1)
+            
+            # Upper line must be descending (visually clear)
+            upper_slope_deg = math.degrees(math.atan(upper_slope))
+            max_upper_slope = upper_cfg.get("max_slope_deg", -3)  # Must be negative
+            min_upper_slope = upper_cfg.get("min_slope_deg", -15)
+            
+            if upper_slope_deg > max_upper_slope or upper_slope_deg < min_upper_slope:
+                continue
+            
+            # Check upper line fit quality
+            upper_predicted = upper_slope * np.array(upper_indices) + upper_intercept
+            upper_residuals = np.abs(upper_prices - upper_predicted)
+            upper_rmsd = np.sqrt(np.mean(upper_residuals**2))
+            upper_price_range = max(upper_prices) - min(upper_prices)
+            
+            if upper_price_range > 0 and upper_rmsd / upper_price_range > upper_cfg.get("max_rmsd_pct_of_height", 0.25):
+                continue
+            
+            # Find matching lower horizontal support
+            start_idx = min(upper_indices)
+            end_idx = max(upper_indices)
+            span = end_idx - start_idx
+            
+            if span < min_span or span > max_span:
+                continue
+            
+            # Get lower pivots within this timeframe
+            lower_in_range = [(idx, price) for idx, price in lo_sorted 
+                             if start_idx <= idx <= end_idx]
+            
+            if len(lower_in_range) < min_lower_touches:
+                continue
+            
+            # Check if lower points form a horizontal support
+            lower_indices = [p[0] for p in lower_in_range]
+            lower_prices = [p[1] for p in lower_in_range]
+            
+            # Fit horizontal line to lower points
+            lower_avg = np.mean(lower_prices)
+            lower_residuals = np.abs(lower_prices - lower_avg)
+            lower_rmsd = np.sqrt(np.mean(lower_residuals**2))
+            lower_price_range = max(lower_prices) - min(lower_prices) if len(lower_prices) > 1 else 0
+            
+            max_lower_rmsd = lower_cfg.get("max_rmsd_pct_of_height", 0.25)
+            if lower_price_range > 0 and lower_rmsd / lower_price_range > max_lower_rmsd:
+                continue
+            
+            # Visual convergence check
+            start_height = (upper_slope * start_idx + upper_intercept) - lower_avg
+            end_height = (upper_slope * end_idx + upper_intercept) - lower_avg
+            
+            if start_height <= 0:  # Invalid triangle
+                continue
+                
+            convergence_ratio = end_height / start_height
+            if convergence_ratio > min_convergence:  # Not converging enough
+                continue
+            
+            # Visual contraction check
+            price_range_start = max(upper_prices) - min(lower_prices)
+            price_range_end = (upper_slope * end_idx + upper_intercept) - lower_avg
+            contraction = (price_range_start - price_range_end) / price_range_start
+            
+            if contraction < min_contraction:
+                continue
+            
+            # Hough line validation (if image available)
+            hough_valid = True
+            if img_path and hough_cfg.get("enabled", True):
+                hough_valid = hough_desc_triangle_ok(img_path, cfg_tri)
+            
+            if not hough_valid:
+                continue
+            
+            # Calculate visual score
+            score = _score_triangle_visual(upper_slope_deg, convergence_ratio, contraction, 
+                                         upper_rmsd/upper_price_range if upper_price_range > 0 else 0,
+                                         lower_rmsd/lower_price_range if lower_price_range > 0 else 0,
+                                         visual_cfg)
+            
+            out.append({
+                "type": "descending_triangle",
+                "start": start_idx,
+                "end": end_idx, 
+                "upper_slope": upper_slope,
+                "upper_intercept": upper_intercept,
+                "support_level": lower_avg,
+                "convergence_ratio": convergence_ratio,
+                "contraction_pct": contraction * 100,
+                "score": score,
+                "icenter": int((start_idx + end_idx) / 2)
+            })
+    
     return out
 
-def is_descending_triangle(det: dict, closes: np.ndarray, flat_tol_rel: float = 0.002) -> bool:
-    """Upper slope negative, lower nearly flat (normalized by mid-price)."""
-    a_hi = det["a_hi"]; a_lo = det["a_lo"]
-    s = det["start"]; e = det["end"]; mid = float(closes[s:e+1].mean())
-    if mid == 0: return False
-    cond_upper_down = (a_hi < 0.0)
-    cond_lower_flat = abs(a_lo)/abs(mid) < flat_tol_rel
-    return cond_upper_down and cond_lower_flat
+def _score_triangle_visual(upper_slope_deg: float, convergence_ratio: float, contraction: float,
+                          upper_fit_quality: float, lower_fit_quality: float, visual_cfg: dict) -> float:
+    """Score triangle pattern based on visual quality"""
+    score = 0.0
+    
+    # Upper slope score (steeper negative is better)
+    ideal_slope = -8.0  # Ideal descending slope
+    slope_score = 1.0 - min(abs(upper_slope_deg - ideal_slope) / 15.0, 1.0)
+    score += slope_score * visual_cfg.get("weight_slope", 1.0)
+    
+    # Convergence score (more convergence is better)
+    convergence_score = 1.0 - convergence_ratio  # Lower ratio = better convergence
+    score += convergence_score * visual_cfg.get("weight_convergence", 1.2)
+    
+    # Contraction score
+    contraction_score = min(contraction / 0.5, 1.0)  # Normalize
+    score += contraction_score * visual_cfg.get("weight_contraction", 0.8)
+    
+    # Line fit quality
+    upper_quality_score = 1.0 - min(upper_fit_quality / 0.3, 1.0)
+    lower_quality_score = 1.0 - min(lower_fit_quality / 0.3, 1.0)
+    score += (upper_quality_score + lower_quality_score) * 0.5 * visual_cfg.get("weight_line_quality", 0.9)
+    
+    return score / 4.0
 
 # --- Triangle Hough gate (image-based confirmation for descending triangle) ---
 def _deg_from_rise_run(dy: float, dx: float) -> float:
@@ -614,6 +1197,8 @@ def main():
     patterns_base = cfg.get("patterns", {}) or {}
     overrides = cfg.get("overrides", []) or []
     labels_map = cfg.get("labels", {}) or {}
+    # Initialize debug log
+    debug_log = init_debug_log()
 
     supported = {
         "head_and_shoulders",
@@ -708,56 +1293,39 @@ def main():
             det_map = {name: [] for name in supported}
 
             if "head_and_shoulders" in active:
-                det_map["head_and_shoulders"] = detect_head_shoulders(
-                    c,
-                    piv_hi,
+                det_map["head_and_shoulders"] = detect_head_shoulders_visual(
+                    c, piv_hi, piv_lo,  # Added piv_lo for neckline detection
                     eff_patterns.get("head_and_shoulders", {}),
-                    atr_mean,
-                    prefer_atr
+                    atr_mean, prefer_atr, debug_log
                 )
 
             if "inverse_head_and_shoulders" in active:
-                det_map["inverse_head_and_shoulders"] = detect_inverse_head_shoulders(
-                    c,
-                    piv_lo,
-                    eff_patterns.get("inverse_head_and_shoulders", eff_patterns.get("head_and_shoulders", {})),
-                    atr_mean,
-                    prefer_atr
+                det_map["inverse_head_and_shoulders"] = detect_inverse_head_shoulders_visual(
+                    c, piv_lo, piv_hi,
+                    eff_patterns.get("inverse_head_and_shoulders", {}),
+                    atr_mean, prefer_atr, debug_log
                 )
 
             # Robust Double Top / Bottom (ATR thresholds, duration, spacing, breakout, NMS)
             if "double_top" in active:
-                det_map["double_top"] = detect_double_top(
-                    close=c,
-                    piv_hi=piv_hi,
-                    cfg_dt=eff_patterns.get("double_top", {}),
-                    atr=atr,
-                    prefer_atr=prefer_atr,
-                    labels_post=labels_post
+                det_map["double_top"] = detect_double_top_visual(
+                    close=c, piv_hi=piv_hi, cfg_dt=eff_patterns.get("double_top", {}),
+                    atr=atr, prefer_atr=prefer_atr, labels_post=labels_post, debug_log=debug_log
                 )
 
             if "double_bottom" in active:
                 cfg_db = deep_merge_dict(eff_patterns.get("double_top", {}), eff_patterns.get("double_bottom", {}))
-                det_map["double_bottom"] = detect_double_bottom(
-                    close=c,
-                    piv_lo=piv_lo,
-                    cfg_db=cfg_db,
-                    atr=atr,
-                    prefer_atr=prefer_atr,
-                    labels_post=labels_post
+                det_map["double_bottom"] = detect_double_bottom_visual(
+                    close=c, piv_lo=piv_lo, cfg_db=cfg_db,
+                    atr=atr, prefer_atr=prefer_atr, labels_post=labels_post, debug_log=debug_log
                 )
 
-            # Descending triangle: geometry + image Hough gate
             if "descending_triangle" in active:
-                tri_cfg = eff_patterns.get("descending_triangle", {}) or {}
-                tri_geom = tri_cfg.get("geometry", {}) or {}
-                tri_all = detect_triangle(c, piv_hi, piv_lo, tri_geom)
-                # image-based confirmation
-                tri_ok = []
-                if tri_all:
-                    if hough_desc_triangle_ok(png, tri_cfg):
-                        tri_ok = tri_all
-                det_map["descending_triangle"] = tri_ok
+                det_map["descending_triangle"] = detect_descending_triangle_visual(
+                    c, piv_hi, piv_lo,
+                    eff_patterns.get("descending_triangle", {}),
+                    atr_mean, png, debug_log  # Pass image path for Hough validation
+                )
 
             # --- presence flags and counts ---
             counts = {name+"_cnt": len(det_map[name]) for name in active}
