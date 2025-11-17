@@ -274,8 +274,9 @@ def detect_double_bottom_visual(close: np.ndarray,
     peak_sep = int(geom.get("valley_min_bars_from_peaks", 2))
     max_pairs = max(1, int(geom.get("max_pairs_per_peak", 5)))
     
+    # Allow wider separations so long "W" patterns are not discarded
     min_trough_sep = visual_cfg.get("min_trough_separation_bars", 8)
-    max_trough_sep = visual_cfg.get("max_trough_separation_bars", 65)
+    max_trough_sep = visual_cfg.get("max_trough_separation_bars", 100)
     
     br = cfg_db.get("breakout", {})
     brc = br.get("confirm", {})
@@ -436,7 +437,8 @@ def _validate_w_shape(close: np.ndarray, i1: int, i2: int, peak_idx: int, p1: fl
     left_ratio = left_ascend_count / max(1, (peak_idx - i1 - 1))
     right_ratio = right_descend_count / max(1, (i2 - peak_idx - 1))
     
-    return left_ratio > 0.6 and right_ratio > 0.6
+    # Slightly relax monotonicity to keep visually plausible but noisy moves
+    return left_ratio > 0.5 and right_ratio > 0.5
 
 def _score_double_bottom_visual(p1: float, p2: float, peak_price: float, i1: int, i2: int, span: int, visual_cfg: dict) -> float:
     """Score double bottom based on visual quality"""
@@ -475,7 +477,8 @@ def detect_head_shoulders_visual(closes: np.ndarray,
     # Visual constraints
     shoulder_sim = float(geom.get("shoulder_height_similarity_pct", 35)) / 100.0
     timing_sim = float(geom.get("shoulder_timing_similarity_pct", 70)) / 100.0
-    min_head_ratio = float(visual_cfg.get("min_head_to_shoulder_ratio", 1.15))
+    # Align default with config (allows flatter heads)
+    min_head_ratio = float(visual_cfg.get("min_head_to_shoulder_ratio", 1.02))
     
     dur = geom.get("duration", {})
     min_span = int(dur.get("min_bars", 30))
@@ -723,7 +726,8 @@ def detect_double_top_visual(close: np.ndarray,
             
             # Visual valley depth check
             valley_ratio = (mid_price - v_price) / mid_price
-            min_valley_ratio = visual_cfg.get("max_valley_to_peak_ratio", 0.7)
+            # Use shallow default (6%) to match config; previously 0.7 starved detections
+            min_valley_ratio = visual_cfg.get("max_valley_to_peak_ratio", 0.06)
             if valley_ratio < min_valley_ratio:
                 log_debug_message(debug_log, "double_top", "insufficient_valley_depth",
                                 {"valley_ratio": valley_ratio, "min_required": min_valley_ratio},
@@ -848,7 +852,8 @@ def detect_inverse_head_shoulders_visual(closes: np.ndarray,
     # Visual constraints (different from regular H&S)
     shoulder_sim = float(geom.get("shoulder_height_similarity_pct", 40)) / 100.0
     timing_sim = float(geom.get("shoulder_timing_similarity_pct", 75)) / 100.0
-    min_head_ratio = float(visual_cfg.get("min_head_depth_ratio", 0.97))
+    # Align default with config (allows flatter inverse heads)
+    min_head_ratio = float(visual_cfg.get("min_head_depth_ratio", 0.92))
     
     dur = geom.get("duration", {})
     min_span = int(dur.get("min_bars", 35))
@@ -1333,7 +1338,14 @@ def main():
                 name+"_confirmed_cnt": sum(1 for d in det_map[name] if d.get("breakout_confirmed", True))
                 for name in active
             }
-            flags = {name: (1 if confirmed_counts[name+"_confirmed_cnt"] > 0 else 0) for name in active}
+            # Presence flag can ignore breakout when label_allow_pre_breakout is enabled
+            flags = {}
+            for name in active:
+                allow_pre = bool(eff_patterns.get(name, {}).get("label_allow_pre_breakout", False))
+                if allow_pre:
+                    flags[name] = 1 if counts[name+"_cnt"] > 0 else 0
+                else:
+                    flags[name] = 1 if confirmed_counts[name+"_confirmed_cnt"] > 0 else 0
 
             # --- YOLO + rich JSON sidecars ---
             cid_lookup = {v: int(k) for k, v in labels_map.items() if v in supported}
