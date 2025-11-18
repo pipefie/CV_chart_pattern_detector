@@ -56,6 +56,14 @@ overrides:
     head_and_shoulders:
       geometry:
         head_above_shoulders_min_atr: 1.0
+    double_top:
+      breakout:
+        confirm:
+          volume_mult: 1.2
+    double_bottom:
+      breakout:
+        confirm:
+          volume_mult: 1.2
   - match:
       symbols: ["AAPL","NVDA","GOOGL","TSLA","AMZN","SPY","QQQ"]
       timeframe: "1h"
@@ -67,17 +75,19 @@ overrides:
         valley_drop_min_pct: 0.012
       breakout:
         confirm:
-          threshold_percent: 0.15      # ~15 bps neck break for 1h large caps
+          threshold_percent: 0.20
           threshold_atr: 0.35          # ATR floor to catch low-vol regimes
-          within_bars: 16              # confirm within a timely window
+          within_bars: 10              # tighter/timely confirmation
+          volume_mult: 1.05            # ease volume gate for low-vol equities
     double_bottom:
       geometry:
         peak_rise_min_pct: 0.012
       breakout:
         confirm:
-          threshold_percent: 0.15
+          threshold_percent: 0.20
           threshold_atr: 0.35
-          within_bars: 16
+          within_bars: 10
+          volume_mult: 1.05
 
 patterns:
   # 1) Head & Shoulders family (2 classes)
@@ -89,8 +99,9 @@ patterns:
       order: "peak-valley-peak-valley-peak"
       head_above_shoulders_min_atr: 0.55  # modest relaxation, still needs clear head
       head_above_shoulders_min_pct: 0.007
+      min_height_atr: 1.2                  # raise height floor to curb noise
       shoulder_height_similarity_pct: 25
-      shoulder_timing_similarity_pct: 60   # slightly broader timing window
+      shoulder_timing_similarity_pct: 70   # allow more timing slack
       neckline:
         type: "line"
         max_slope_deg: 12
@@ -102,8 +113,9 @@ patterns:
       side: "down"
       confirm:
         type: "close_beyond_line"
-        threshold_atr: 0.35         # close ≤ neckline − 0.35×ATR
-        threshold_percent: 0.12 
+        threshold_atr: 0.20         # mild break to allow valid labels
+        threshold_percent: 0.20
+        within_bars: 10
     invalidation:
       closes_back_above_neckline_within_bars: 10
       right_shoulder_exceeds_head_atr: 0.25
@@ -122,16 +134,19 @@ patterns:
     class_id: 1
     direction: "bullish"
     inherits: "head_and_shoulders"
-    geometry:
-      head_above_shoulders_min_atr: 0.45   # allow deeper heads typical of basing structures
-      head_above_shoulders_min_pct: 0.006
-      shoulder_timing_similarity_pct: 65   # broader timing symmetry on reversals
+      geometry:
+        head_above_shoulders_min_atr: 0.45   # allow deeper heads typical of basing structures
+        head_above_shoulders_min_pct: 0.006
+        min_height_atr: 1.0
+        shoulder_timing_similarity_pct: 75   # broader timing symmetry on reversals
+      min_height_atr: 0.8
     breakout:
       side: "up"
       confirm:
         type: "close_beyond_line"
-        threshold_atr: 0.35       # same 0.35 ATR in opposite direction
-        threshold_percent: 0.12 
+        threshold_atr: 0.20       # mild break
+        threshold_percent: 0.20
+        within_bars: 10
     trade_plan:
       stop:
         mode: "swing_point"
@@ -150,8 +165,8 @@ patterns:
       valley_min_bars_from_peaks: 3       # slightly looser spacing
       max_pairs_per_peak: 5               # limit combinatorial explosions
       dynamic_thresholds:
-        valley_drop_min_height_pct: 12    # 12% of pattern height as extra guard
-        breakout_height_pct: 6            # breakout must travel ≥6% of pattern height
+        valley_drop_min_height_pct: 15    # require deeper pullback vs pattern height
+        breakout_height_pct: 7            # breakout must travel a bit further
         atr_floor_mult: 0.5               # fallback on half ATR of recent vol
         vol_lookback_bars: 36
       duration:
@@ -192,8 +207,8 @@ patterns:
       peak_rise_min_pct: 0.010
       max_pairs_per_peak: 5
       dynamic_thresholds:
-        valley_drop_min_height_pct: 12
-        breakout_height_pct: 6
+        valley_drop_min_height_pct: 14
+        breakout_height_pct: 7
         atr_floor_mult: 0.5
         vol_lookback_bars: 36
     breakout:

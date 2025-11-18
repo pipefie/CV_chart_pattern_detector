@@ -70,3 +70,19 @@ It’s a “typical price” per bar. Using HLC3 to compute indicators (like ATR
 
 So when we calculate ATR (or any indicator that uses a “price series”), we first transform OHLCV into a single “price per bar” = HLC3. (If you prefer, you can set "close" or "hl2" = (High+Low)/2.)
 
+## Heuristic Labeling Journey (Weak Labels)
+
+We tightened the scripted labeler step by step to make it usable for CV training while staying close to TA intuition:
+
+- **Initial flood:** Double-top was ~90% positive; H&S/IHS/triangles were mostly zero. Causes: loose geometry, no per-symbol overrides, no breakout gating.
+- **Geometry/vol filters:** Raised pivot prominence, valley/peak depth, added ATR/percent hybrids, per-symbol overrides (equities vs crypto), dynamic thresholds, deduplication, and separated raw `*_cnt` from `*_confirmed_cnt`.
+- **ATR/volume/trend guards:** Added pattern-height floors, volume ordering on shoulders/head, breakout volume spikes, and prior-trend checks. This reduced noise but temporarily over-pruned H&S/IHS.
+- **Breakout gating for H&S/IHS:** Now require a neckline break to emit; height floors and volume ordering (0.95 ratios) remain. Without confirmation H&S over-fired; with very strict gates it vanished—timing/height/volume/breakout must be balanced.
+- **Per-symbol confirmation tuning:** Equities use short confirmation windows and softer breakout volume; BTC/ETH use stricter volume. DT/DB geometry tightened (height_pct up) to reduce over-firing; short confirm windows keep signals timely.
+- **Alignment checks:** `scripts/validate_detectors.py` compares our detections to a TA ZigZag baseline and emits CSV + JSON (`reports/validation/detector_audit.*`) with only-ours/only-TA counts per pattern/symbol. Use agreement rates and confirm rates each run to spot over/under-fire and guide tuning.
+
+When adjusting:
+- Geometry: height_pct, min_height_atr, symmetry.
+- Confirmation: percent/ATR break, within_bars, volume multiplier (per symbol).
+- If a class floods, tighten geometry/confirmation; if it vanishes, ease timing/height or allow pre-breakout flags while training on confirmed.
+

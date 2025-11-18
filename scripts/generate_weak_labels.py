@@ -259,6 +259,8 @@ def detect_double_top(close: np.ndarray,
     br_thr_atr = brc.get("threshold_atr", None)
     br_thr_pct = brc.get("threshold_percent", None)
     br_within  = brc.get("within_bars", None)
+    br_vol_mult = brc.get("volume_mult", None)
+    br_vol_mult = brc.get("volume_mult", None)
     require_confirmation = bool(br.get("require_confirmation", True))
     allow_pre_breakout = bool(cfg_dt.get("label_allow_pre_breakout", False))
 
@@ -268,6 +270,9 @@ def detect_double_top(close: np.ndarray,
 
     dyn = (geom.get("dynamic_thresholds") or {})
     dyn_lookback = int(dyn.get("vol_lookback_bars", 36))
+    vol_lookback = max(dyn_lookback, 60)
+    vol_lookback = max(dyn_lookback, 50)
+    vol_lookback = max(dyn_lookback, 50)
 
     min_height_atr = float(geom.get("min_height_atr", 0.0))
 
@@ -342,14 +347,16 @@ def detect_double_top(close: np.ndarray,
                     continue
                 breakout_ok = _level_breakout_confirm(future, level=v, side=br_side, thr_abs=thr_abs, within_bars=br_within)
 
-                # volume spike on breakout relative to recent average
+                # volume spike on breakout relative to recent average (soften to 1.1x)
                 if breakout_ok and volume is not None and len(volume) == len(close):
-                    recent_vol = float(np.nanmean(volume[max(0, i2 - dyn_lookback):i2])) if dyn_lookback > 0 else float(np.nanmean(volume))
-                    brk_vol = float(np.nanmean(volume[i2+1 : i2+1 + (br_within or 1)])) if br_within else float(volume[i2+1])
-                    if recent_vol > 0 and brk_vol < 1.5 * recent_vol:
+                    mult = float(br_vol_mult) if br_vol_mult is not None else 1.1
+                    recent_vol = float(np.nanmean(volume[max(0, i2 - vol_lookback):i2])) if vol_lookback > 0 else float(np.nanmean(volume))
+                    brk_window = br_within or 1
+                    brk_vol = float(np.nanmean(volume[i2+1 : i2+1 + brk_window]))
+                    if recent_vol > 0 and brk_vol < mult * recent_vol:
                         breakout_ok = False
                         if debug_log is not None:
-                            debug_log.append({"pattern":"double_top","reason":"low_breakout_volume","brk_vol":brk_vol,"recent_vol":recent_vol,"i2":i2})
+                            debug_log.append({"pattern":"double_top","reason":"low_breakout_volume","brk_vol":brk_vol,"recent_vol":recent_vol,"i2":i2,"needed_mult":mult})
             if not breakout_ok and require_confirmation and not allow_pre_breakout:
                 if debug_log is not None:
                     debug_log.append({"pattern":"double_top","reason":"no_breakout","level":v,"thr_abs":thr_abs,"i2":i2})
@@ -389,6 +396,7 @@ def detect_double_bottom(close: np.ndarray,
     br_thr_atr = brc.get("threshold_atr", None)
     br_thr_pct = brc.get("threshold_percent", None)
     br_within  = brc.get("within_bars", None)
+    br_vol_mult = brc.get("volume_mult", None)
     require_confirmation = bool(br.get("require_confirmation", True))
     allow_pre_breakout = bool(cfg_db.get("label_allow_pre_breakout", False))
 
@@ -398,6 +406,7 @@ def detect_double_bottom(close: np.ndarray,
 
     dyn = (geom.get("dynamic_thresholds") or {})
     dyn_lookback = int(dyn.get("vol_lookback_bars", 36))
+    vol_lookback = max(dyn_lookback, 60)
 
     min_height_atr = float(geom.get("min_height_atr", 0.0))
 
@@ -472,12 +481,14 @@ def detect_double_bottom(close: np.ndarray,
                 breakout_ok = _level_breakout_confirm(future, level=pk, side=br_side, thr_abs=thr_abs, within_bars=br_within)
 
                 if breakout_ok and volume is not None and len(volume) == len(close):
-                    recent_vol = float(np.nanmean(volume[max(0, i2 - dyn_lookback):i2])) if dyn_lookback > 0 else float(np.nanmean(volume))
-                    brk_vol = float(np.nanmean(volume[i2+1 : i2+1 + (br_within or 1)])) if br_within else float(volume[i2+1])
-                    if recent_vol > 0 and brk_vol < 1.5 * recent_vol:
+                    mult = float(br_vol_mult) if br_vol_mult is not None else 1.1
+                    recent_vol = float(np.nanmean(volume[max(0, i2 - vol_lookback):i2])) if vol_lookback > 0 else float(np.nanmean(volume))
+                    brk_window = br_within or 1
+                    brk_vol = float(np.nanmean(volume[i2+1 : i2+1 + brk_window]))
+                    if recent_vol > 0 and brk_vol < mult * recent_vol:
                         breakout_ok = False
                         if debug_log is not None:
-                            debug_log.append({"pattern":"double_bottom","reason":"low_breakout_volume","brk_vol":brk_vol,"recent_vol":recent_vol,"i2":i2})
+                            debug_log.append({"pattern":"double_bottom","reason":"low_breakout_volume","brk_vol":brk_vol,"recent_vol":recent_vol,"i2":i2,"needed_mult":mult})
             if not breakout_ok and require_confirmation and not allow_pre_breakout:
                 if debug_log is not None:
                     debug_log.append({"pattern":"double_bottom","reason":"no_breakout","level":pk,"thr_abs":thr_abs,"i2":i2})
@@ -509,6 +520,12 @@ def detect_head_shoulders(closes: np.ndarray,
     shoulder_sim = float(geom.get("shoulder_height_similarity_pct", 25)) / 100.0
     min_height_atr = float(geom.get("min_height_atr", 0.0))
     trend_lookback = int(geom.get("trend_lookback_bars", 0))
+    br = cfg.get("breakout", {}) or {}
+    brc = br.get("confirm", {}) or {}
+    br_side = br.get("side", "down")
+    br_thr_atr = brc.get("threshold_atr", None)
+    br_thr_pct = brc.get("threshold_percent", None)
+    br_within = brc.get("within_bars", None)
     piv_sorted = sorted(piv_hi, key=lambda t: t[0])
     for iL, pL in piv_sorted:
         for iH, pH in piv_sorted:
@@ -547,16 +564,32 @@ def detect_head_shoulders(closes: np.ndarray,
                     if debug_log is not None:
                         debug_log.append({"pattern":"head_shoulders","reason":"no_uptrend","iL":iL})
                     continue
-                # volume ordering: head < LS, RS < head
+                # volume ordering: head < LS, RS < head (hard gate with mild 0.95 ratio)
                 if volume is not None and len(volume) == len(closes):
                     vol_L = float(volume[iL]) if iL < len(volume) else 0.0
                     vol_H = float(volume[iH]) if iH < len(volume) else 0.0
                     vol_R = float(volume[iR]) if iR < len(volume) else 0.0
-                    if not (vol_H < 0.9 * vol_L and vol_R < 0.9 * vol_H):
+                    if not (vol_H < 0.95 * vol_L and vol_R < 0.95 * vol_H):
                         if debug_log is not None:
                             debug_log.append({"pattern":"head_shoulders","reason":"volume_order","vol_L":vol_L,"vol_H":vol_H,"vol_R":vol_R})
                         continue
-                out.append({"type":"head_shoulders","iL":iL,"pL":pL,"iH":iH,"pH":pH,"iR":iR,"pR":pR})
+
+                # breakout confirmation: compute neckline between two troughs
+                if brc:
+                    t1_idx = iL + int(np.argmin(closes[iL:iH+1]))
+                    t2_idx = iH + int(np.argmin(closes[iH:iR+1]))
+                    neckline = 0.5 * (closes[t1_idx] + closes[t2_idx])
+                    thr_abs = _choose_abs_threshold(br_thr_atr, br_thr_pct, atr_mean, neckline, prefer_atr)
+                    if thr_abs > 0:  # gate label on confirmed break
+                        confirmed = False
+                        future = closes[iR+1 : iR+1 + (br_within or 0)] if br_within else closes[iR+1 :]
+                        confirmed = len(future) > 0 and _level_breakout_confirm(future, level=neckline, side=br_side, thr_abs=thr_abs, within_bars=br_within)
+                        if not confirmed:
+                            continue  # do not emit unconfirmed H&S
+                else:
+                    # if no breakout block is provided, we keep the detection
+                    pass
+                out.append({"type":"head_shoulders","iL":iL,"pL":pL,"iH":iH,"pH":pH,"iR":iR,"pR":pR,"breakout_confirmed": True})
     return out
 
 def detect_inverse_head_shoulders(closes: np.ndarray,
@@ -617,11 +650,27 @@ def detect_inverse_head_shoulders(closes: np.ndarray,
                     vol_L = float(volume[iL]) if iL < len(volume) else 0.0
                     vol_H = float(volume[iH]) if iH < len(volume) else 0.0
                     vol_R = float(volume[iR]) if iR < len(volume) else 0.0
-                    if not (vol_L < 0.9 * vol_H and vol_R < 0.9 * vol_L):
+                    if not (vol_L < 0.95 * vol_H and vol_R < 0.95 * vol_L):
                         if debug_log is not None:
                             debug_log.append({"pattern":"inverse_head_shoulders","reason":"volume_order","vol_L":vol_L,"vol_H":vol_H,"vol_R":vol_R})
                         continue
-                out.append({"type":"inverse_head_shoulders","iL":iL,"pL":pL,"iH":iH,"pH":pH,"iR":iR,"pR":pR})
+                confirmed = True
+                if cfg.get("breakout", {}).get("confirm"):
+                    br = cfg.get("breakout", {}) or {}
+                    brc = br.get("confirm", {}) or {}
+                    br_side = br.get("side", "up")
+                    br_thr_atr = brc.get("threshold_atr", None)
+                    br_thr_pct = brc.get("threshold_percent", None)
+                    br_within = brc.get("within_bars", None)
+                    t1_idx = iL + int(np.argmax(closes[iL:iH+1]))
+                    t2_idx = iH + int(np.argmax(closes[iH:iR+1]))
+                    neckline = 0.5 * (closes[t1_idx] + closes[t2_idx])
+                    thr_abs = _choose_abs_threshold(br_thr_atr, br_thr_pct, atr_mean, neckline, prefer_atr)
+                    future = closes[iR+1 : iR+1 + (br_within or 0)] if br_within else closes[iR+1 :]
+                    confirmed = len(future) > 0 and _level_breakout_confirm(future, level=neckline, side=br_side, thr_abs=thr_abs, within_bars=br_within)
+                    if not confirmed:
+                        continue
+                out.append({"type":"inverse_head_shoulders","iL":iL,"pL":pL,"iH":iH,"pH":pH,"iR":iR,"pR":pR,"breakout_confirmed": True})
     return out
 
 def detect_triangle(closes: np.ndarray, piv_hi: list[tuple[int,float]], piv_lo: list[tuple[int,float]], cfg_geom: dict) -> list[dict]:
@@ -886,11 +935,11 @@ def main():
 
             # --- presence flags and counts ---
             counts = {name+"_cnt": len(det_map[name]) for name in active}
-            confirmed_counts = {
-                name+"_confirmed_cnt": sum(1 for d in det_map[name] if d.get("breakout_confirmed", True))
-                for name in active
-            }
-            flags = {name: (1 if confirmed_counts[name+"_confirmed_cnt"] > 0 else 0) for name in active}
+    confirmed_counts = {
+        name+"_confirmed_cnt": sum(1 for d in det_map[name] if d.get("breakout_confirmed", True))
+        for name in active
+    }
+    flags = {name: (1 if confirmed_counts[name+"_confirmed_cnt"] > 0 else 0) for name in active}
 
             # --- YOLO + rich JSON sidecars ---
             cid_lookup = {v: int(k) for k, v in labels_map.items() if v in supported}

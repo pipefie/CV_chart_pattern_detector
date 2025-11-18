@@ -14,6 +14,7 @@ from typing import Dict, List
 import numpy as np
 import pandas as pd
 import cv2 as cv
+from collections import Counter
 
 try:
     import pandas_ta as pta
@@ -190,6 +191,7 @@ def main():
     ap.add_argument("--stride", type=int, default=40, help="Stride between windows")
     ap.add_argument("--patterns_cfg", default="configs/patterns.yaml")
     ap.add_argument("--output", default="reports/validation/detector_audit.csv")
+    ap.add_argument("--report_json", default="reports/validation/detector_audit.report.json")
     ap.add_argument("--ta_zigzag_percent", type=float, default=1.2, help="Percent move for TA ZigZag baseline")
     ap.add_argument("--edge_debug", type=Path, help="Optional path to PNG for Canny threshold sweep")
     ap.add_argument("--edge_blur", type=int, default=5)
@@ -254,8 +256,55 @@ def main():
 
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows).to_csv(out_path, index=False)
-    print(f"✅ Detector audit saved to {out_path} ({len(rows)} rows)")
+    df = pd.DataFrame(rows)
+    df.to_csv(out_path, index=False)
+    print(f"✅ Detector audit saved to {out_path} ({len(df)} rows)")
+
+    # Build a concise JSON report for quick drift checks
+    summary = {}
+    summary["total_windows"] = len(df)
+    summary["symbols_analyzed"] = int(df["symbol"].nunique())
+    patterns = ["double_top","double_bottom","head_shoulders","inverse_head_shoulders","descending_triangle"]
+    for name in patterns:
+        our_col = f"our_{name}"
+        ta_col = f"ta_{name}"
+        our_hits = int((df[our_col] > 0).sum()) if our_col in df.columns else 0
+        ta_hits = int((df[ta_col] > 0).sum()) if ta_col in df.columns else 0
+        both = int(((df[our_col] > 0) & (df[ta_col] > 0)).sum()) if (our_col in df.columns and ta_col in df.columns) else 0
+        ratio = (our_hits / ta_hits) if ta_hits else 0.0
+        summary[f"{name}_our_windows"] = our_hits
+        summary[f"{name}_ta_windows"] = ta_hits
+        summary[f"{name}_agreement_windows"] = both
+        summary[f"{name}_detection_ratio"] = ratio
+        summary[f"{name}_only_ours"] = our_hits - both
+        summary[f"{name}_only_ta"] = ta_hits - both
+
+    by_symbol = {}
+    for sym, g in df.groupby("symbol"):
+        entry = {
+            "our_dt_mean": float(g.get("our_double_top", pd.Series(dtype=float)).mean()),
+            "ta_dt_mean": float(g.get("ta_double_top", pd.Series(dtype=float)).mean()),
+            "our_db_mean": float(g.get("our_double_bottom", pd.Series(dtype=float)).mean()),
+            "ta_db_mean": float(g.get("ta_double_bottom", pd.Series(dtype=float)).mean()),
+            "dt_confirm_rate": float(g.get("our_double_top_confirmed", pd.Series(dtype=float)).sum() / max(1, g.get("our_double_top", pd.Series(dtype=float)).sum())),
+            "db_confirm_rate": float(g.get("our_double_bottom_confirmed", pd.Series(dtype=float)).sum() / max(1, g.get("our_double_bottom", pd.Series(dtype=float)).sum())),
+        }
+        for name in ["head_shoulders","inverse_head_shoulders","descending_triangle"]:
+            our_col = f"our_{name}"
+            ta_col = f"ta_{name}"
+            entry[f"our_{name}_mean"] = float(g[our_col].mean()) if our_col in g.columns else 0.0
+            if ta_col in g.columns:
+                entry[f"ta_{name}_mean"] = float(g[ta_col].mean())
+            entry[f"{name}_only_ours"] = int((g[our_col] > 0).sum()) if our_col in g.columns else 0
+            if ta_col in g.columns:
+                entry[f"{name}_only_ta"] = int((g[ta_col] > 0).sum() - ((g[our_col] > 0) & (g[ta_col] > 0)).sum()) if our_col in g.columns else int((g[ta_col] > 0).sum())
+        by_symbol[sym] = entry
+    summary["per_symbol"] = by_symbol
+
+    rep_path = Path(args.report_json)
+    rep_path.parent.mkdir(parents=True, exist_ok=True)
+    rep_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(f"ℹ️ Summary report written: {rep_path}")
 
 
 if __name__ == "__main__":
