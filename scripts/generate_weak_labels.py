@@ -372,8 +372,12 @@ def detect_double_bottom_visual(close: np.ndarray,
                 w_shape_valid = _validate_w_shape(close, i1, i2, peak_idx, p1, p2, peak_price)
             
             if not w_shape_valid:
-                log_debug_message(debug_log, "double_bottom", "invalid_w_shape", {}, (i1, i2))
-                continue
+                # Soft-pass for shallow violations if enabled
+                if visual_cfg.get("allow_soft_w_shape", False) and peak_ratio >= 0.7 * min_peak_ratio:
+                    pass
+                else:
+                    log_debug_message(debug_log, "double_bottom", "invalid_w_shape", {}, (i1, i2))
+                    continue
             
             # Breakout confirmation
             breakout_ok = True
@@ -475,7 +479,7 @@ def detect_head_shoulders_visual(closes: np.ndarray,
     # Visual constraints
     shoulder_sim = float(geom.get("shoulder_height_similarity_pct", 35)) / 100.0
     timing_sim = float(geom.get("shoulder_timing_similarity_pct", 70)) / 100.0
-    min_head_ratio = float(visual_cfg.get("min_head_to_shoulder_ratio", 1.15))
+    min_head_ratio = float(visual_cfg.get("min_head_to_shoulder_ratio", 1.02))
     
     dur = geom.get("duration", {})
     min_span = int(dur.get("min_bars", 30))
@@ -640,15 +644,15 @@ def detect_double_top_visual(close: np.ndarray,
     visual_cfg = cfg_dt.get("visual", {})
     
     dur = geom.get("duration", {})
-    min_span = int(dur.get("min_bars", 20))
-    max_span = int(dur.get("max_bars", 90))
+    min_span = int(dur.get("min_bars", 18))
+    max_span = int(dur.get("max_bars", 140))
     
-    sim_tol = float(geom.get("peak_height_similarity_pct", 5)) / 100.0
+    sim_tol = float(geom.get("peak_height_similarity_pct", 8)) / 100.0
     valley_sep = int(geom.get("valley_min_bars_from_peaks", 2))
-    max_pairs = max(1, int(geom.get("max_pairs_per_peak", 4)))
+    max_pairs = max(1, int(geom.get("max_pairs_per_peak", 6)))
     
-    min_peak_sep = geom.get("min_peak_separation_bars", 10)
-    max_peak_sep = geom.get("max_peak_separation_bars", 60)
+    min_peak_sep = geom.get("min_peak_separation_bars", 8)
+    max_peak_sep = geom.get("max_peak_separation_bars", 120)
     
     br = cfg_dt.get("breakout", {})
     brc = br.get("confirm", {})
@@ -723,16 +727,20 @@ def detect_double_top_visual(close: np.ndarray,
             
             # Visual valley depth check
             valley_ratio = (mid_price - v_price) / mid_price
-            min_valley_ratio = visual_cfg.get("max_valley_to_peak_ratio", 0.7)
-            if valley_ratio < min_valley_ratio:
+            # Require only a modest dip unless config overrides; allow ATR fallback
+            min_valley_ratio = visual_cfg.get("max_valley_to_peak_ratio", 0.06)
+            min_valley_atr = visual_cfg.get("min_valley_drop_atr", 0.0)
+            valley_drop = mid_price - v_price
+            ok_depth = valley_ratio >= min_valley_ratio or (min_valley_atr > 0 and valley_drop >= min_valley_atr * atr_mean)
+            if not ok_depth:
                 log_debug_message(debug_log, "double_top", "insufficient_valley_depth",
-                                {"valley_ratio": valley_ratio, "min_required": min_valley_ratio},
+                                {"valley_ratio": valley_ratio, "min_required": min_valley_ratio, "valley_drop": valley_drop, "atr_floor": min_valley_atr * atr_mean},
                                 (i1, i2))
                 continue
             
             # Visual pattern height
             pattern_height = max(p1, p2) - v_price
-            min_pattern_height = geom.get("min_pattern_height_atr", 1.2) * atr_mean
+            min_pattern_height = geom.get("min_pattern_height_atr", 0.8) * atr_mean
             if pattern_height < min_pattern_height:
                 log_debug_message(debug_log, "double_top", "insufficient_pattern_height",
                                 {"pattern_height": pattern_height, "min_required": min_pattern_height},
@@ -745,8 +753,12 @@ def detect_double_top_visual(close: np.ndarray,
                 m_shape_valid = _validate_m_shape(close, i1, i2, v_idx, p1, p2, v_price)
             
             if not m_shape_valid:
-                log_debug_message(debug_log, "double_top", "invalid_m_shape", {}, (i1, i2))
-                continue
+                # Soft-pass: allow near misses if depth is acceptable and soft flag enabled
+                if visual_cfg.get("allow_soft_m_shape", False) and ok_depth:
+                    pass
+                else:
+                    log_debug_message(debug_log, "double_top", "invalid_m_shape", {}, (i1, i2))
+                    continue
             
             # Breakout confirmation
             breakout_ok = True
@@ -848,10 +860,10 @@ def detect_inverse_head_shoulders_visual(closes: np.ndarray,
     # Visual constraints (different from regular H&S)
     shoulder_sim = float(geom.get("shoulder_height_similarity_pct", 40)) / 100.0
     timing_sim = float(geom.get("shoulder_timing_similarity_pct", 75)) / 100.0
-    min_head_ratio = float(visual_cfg.get("min_head_depth_ratio", 0.97))
+    min_head_ratio = float(visual_cfg.get("min_head_depth_ratio", 0.92))
     
     dur = geom.get("duration", {})
-    min_span = int(dur.get("min_bars", 35))
+    min_span = int(dur.get("min_bars", 30))
     max_span = int(dur.get("max_bars", 220))
     
     piv_sorted = sorted(piv_lo, key=lambda t: t[0])
