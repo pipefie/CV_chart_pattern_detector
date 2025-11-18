@@ -235,6 +235,68 @@ def _apply_dynamic_floor(base_abs: float,
         val = max(val, atr_mult * max(atr_recent, 1e-9))
     return val
 
+# --- Simple labeling-function ensembles for DT/DB ---
+def lf_votes_double_top(cands: list[dict], atr_mean_val: float) -> tuple[int,int,float]:
+    """LF ensemble for double_top: strict/loose depth vs ATR, symmetry, breakout; top 2 candidates with penalties/negatives."""
+    if not cands:
+        return 0, 0, 0.0
+    if len(cands) > 12:
+        return 0, 1, 0.0
+    votes_pos = votes_tot = 0
+    atrm = atr_mean_val if atr_mean_val else 0.0
+    for d in sorted(cands, key=lambda x: x.get("score", 0.0), reverse=True)[:2]:
+        p1, p2, v = d.get("p1"), d.get("p2"), d.get("pvalley")
+        if p1 is None or p2 is None or v is None:
+            continue
+        mid = 0.5*(p1+p2)
+        height = max(p1,p2) - v
+        sym = abs(p1 - p2)/max(1e-9, mid)
+        breakout = d.get("breakout_confirmed", False)
+        # strict depth
+        votes_tot += 1; votes_pos += 1 if (atrm > 0 and height/atrm >= 1.2) else 0
+        # loose depth
+        votes_tot += 1; votes_pos += 1 if (atrm > 0 and height/atrm >= 0.8) else 0
+        # symmetry votes at two levels; add a penalty if poor symmetry
+        votes_tot += 2
+        votes_pos += 1 if sym <= 0.05 else 0
+        votes_pos += 1 if sym <= 0.09 else 0
+        if sym > 0.12:
+            votes_tot += 1  # explicit negative weight
+        # breakout vote
+        votes_tot += 1; votes_pos += 1 if breakout else 0
+        # quality: very shallow gets a penalty
+        votes_tot += 1; votes_pos += 1 if (atrm > 0 and height/atrm >= 0.5) else 0
+    p = votes_pos / votes_tot if votes_tot else 0.0
+    return votes_pos, votes_tot, p
+
+def lf_votes_double_bottom(cands: list[dict], atr_mean_val: float) -> tuple[int,int,float]:
+    """LF ensemble for double_bottom: strict/loose rise vs ATR, symmetry, breakout; top 2 candidates with penalties/negatives."""
+    if not cands:
+        return 0, 0, 0.0
+    if len(cands) > 12:
+        return 0, 1, 0.0
+    votes_pos = votes_tot = 0
+    atrm = atr_mean_val if atr_mean_val else 0.0
+    for d in sorted(cands, key=lambda x: x.get("score", 0.0), reverse=True)[:2]:
+        p1, p2, pk = d.get("p1"), d.get("p2"), d.get("ppeak")
+        if p1 is None or p2 is None or pk is None:
+            continue
+        mid = 0.5*(p1+p2)
+        height = pk - min(p1,p2)
+        sym = abs(p1 - p2)/max(1e-9, mid)
+        breakout = d.get("breakout_confirmed", False)
+        votes_tot += 1; votes_pos += 1 if (atrm > 0 and height/atrm >= 1.2) else 0
+        votes_tot += 1; votes_pos += 1 if (atrm > 0 and height/atrm >= 0.8) else 0
+        votes_tot += 2
+        votes_pos += 1 if sym <= 0.05 else 0
+        votes_pos += 1 if sym <= 0.09 else 0
+        if sym > 0.12:
+            votes_tot += 1
+        votes_tot += 1; votes_pos += 1 if breakout else 0
+        votes_tot += 1; votes_pos += 1 if (atrm > 0 and height/atrm >= 0.5) else 0
+    p = votes_pos / votes_tot if votes_tot else 0.0
+    return votes_pos, votes_tot, p
+
 # --- Robust Double Top ---
 def detect_double_top(close: np.ndarray,
                       volume: np.ndarray | None,
@@ -935,11 +997,12 @@ def main():
 
             # --- presence flags and counts ---
             counts = {name+"_cnt": len(det_map[name]) for name in active}
-    confirmed_counts = {
-        name+"_confirmed_cnt": sum(1 for d in det_map[name] if d.get("breakout_confirmed", True))
-        for name in active
-    }
-    flags = {name: (1 if confirmed_counts[name+"_confirmed_cnt"] > 0 else 0) for name in active}
+            confirmed_counts = {
+                name+"_confirmed_cnt": sum(1 for d in det_map[name] if d.get("breakout_confirmed", True))
+                for name in active
+            }
+
+            flags = {name: (1 if confirmed_counts[name+"_confirmed_cnt"] > 0 else 0) for name in active}
 
             # --- YOLO + rich JSON sidecars ---
             cid_lookup = {v: int(k) for k, v in labels_map.items() if v in supported}
@@ -1004,13 +1067,34 @@ def main():
             }
             for name in ["head_and_shoulders","inverse_head_and_shoulders","double_top","double_bottom","descending_triangle"]:
                 if name in active:
-                    row[f"y_{name}"] = int(flags[name])
-                    row[f"{name}_cnt"] = int(counts[name+"_cnt"])
-                    row[f"{name}_confirmed_cnt"] = int(confirmed_counts[name+"_confirmed_cnt"])
+                    raw = counts.get(name+"_cnt", 0)
+                    conf = confirmed_counts.get(name+"_confirmed_cnt", 0)
+                    if name == "double_top":
+                        pos_votes, total_votes, p = lf_votes_double_top(det_map[name], atr_mean)
+                        row[f"p_{name}"] = round(p,4)
+                        row[f"lf_votes_{name}"] = pos_votes
+                        row[f"lf_total_{name}"] = total_votes
+                        row[f"y_{name}"] = 1 if p >= 0.9 else 0 if p <= 0.1 else -1
+                    elif name == "double_bottom":
+                        pos_votes, total_votes, p = lf_votes_double_bottom(det_map[name], atr_mean)
+                        row[f"p_{name}"] = round(p,4)
+                        row[f"lf_votes_{name}"] = pos_votes
+                        row[f"lf_total_{name}"] = total_votes
+                        row[f"y_{name}"] = 1 if p >= 0.9 else 0 if p <= 0.1 else -1
+                    else:
+                        row[f"y_{name}"] = int(flags[name])
+                        row[f"p_{name}"] = ""
+                        row[f"lf_votes_{name}"] = ""
+                        row[f"lf_total_{name}"] = ""
+                    row[f"{name}_cnt"] = int(raw)
+                    row[f"{name}_confirmed_cnt"] = int(conf)
                 else:
                     row[f"y_{name}"] = 0
                     row[f"{name}_cnt"] = 0
                     row[f"{name}_confirmed_cnt"] = 0
+                    row[f"p_{name}"] = ""
+                    row[f"lf_votes_{name}"] = ""
+                    row[f"lf_total_{name}"] = ""
 
             rows.append(row)
 

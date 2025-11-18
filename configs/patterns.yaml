@@ -77,8 +77,8 @@ overrides:
         confirm:
           threshold_percent: 0.20
           threshold_atr: 0.35          # ATR floor to catch low-vol regimes
-          within_bars: 10              # tighter/timely confirmation
-          volume_mult: 1.05            # ease volume gate for low-vol equities
+          within_bars: 8               # tighter/timely confirmation
+          volume_mult: 1.0             # ease volume gate for low-vol equities
     double_bottom:
       geometry:
         peak_rise_min_pct: 0.012
@@ -86,8 +86,8 @@ overrides:
         confirm:
           threshold_percent: 0.20
           threshold_atr: 0.35
-          within_bars: 10
-          volume_mult: 1.05
+          within_bars: 8
+          volume_mult: 1.0
 
 patterns:
   # 1) Head & Shoulders family (2 classes)
@@ -99,9 +99,9 @@ patterns:
       order: "peak-valley-peak-valley-peak"
       head_above_shoulders_min_atr: 0.55  # modest relaxation, still needs clear head
       head_above_shoulders_min_pct: 0.007
-      min_height_atr: 1.2                  # raise height floor to curb noise
+      min_height_atr: 0.9                  # modest floor to avoid micro-patterns
       shoulder_height_similarity_pct: 25
-      shoulder_timing_similarity_pct: 70   # allow more timing slack
+      shoulder_timing_similarity_pct: 60   # soften timing to recover positives
       neckline:
         type: "line"
         max_slope_deg: 12
@@ -113,8 +113,8 @@ patterns:
       side: "down"
       confirm:
         type: "close_beyond_line"
-        threshold_atr: 0.20         # mild break to allow valid labels
-        threshold_percent: 0.20
+        threshold_atr: 0.10         # softer break to recover positives
+        threshold_percent: 0.10
         within_bars: 10
     invalidation:
       closes_back_above_neckline_within_bars: 10
@@ -134,18 +134,17 @@ patterns:
     class_id: 1
     direction: "bullish"
     inherits: "head_and_shoulders"
-      geometry:
-        head_above_shoulders_min_atr: 0.45   # allow deeper heads typical of basing structures
-        head_above_shoulders_min_pct: 0.006
-        min_height_atr: 1.0
-        shoulder_timing_similarity_pct: 75   # broader timing symmetry on reversals
-      min_height_atr: 0.8
+    geometry:
+      head_above_shoulders_min_atr: 0.4   # allow deeper heads typical of basing structures
+      head_above_shoulders_min_pct: 0.006
+      min_height_atr: 0.7
+      shoulder_timing_similarity_pct: 70   # broader timing symmetry on reversals
     breakout:
       side: "up"
       confirm:
         type: "close_beyond_line"
-        threshold_atr: 0.20       # mild break
-        threshold_percent: 0.20
+        threshold_atr: 0.10       # mild break
+        threshold_percent: 0.10
         within_bars: 10
     trade_plan:
       stop:

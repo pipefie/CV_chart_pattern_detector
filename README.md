@@ -79,10 +79,12 @@ We tightened the scripted labeler step by step to make it usable for CV training
 - **ATR/volume/trend guards:** Added pattern-height floors, volume ordering on shoulders/head, breakout volume spikes, and prior-trend checks. This reduced noise but temporarily over-pruned H&S/IHS.
 - **Breakout gating for H&S/IHS:** Now require a neckline break to emit; height floors and volume ordering (0.95 ratios) remain. Without confirmation H&S over-fired; with very strict gates it vanished—timing/height/volume/breakout must be balanced.
 - **Per-symbol confirmation tuning:** Equities use short confirmation windows and softer breakout volume; BTC/ETH use stricter volume. DT/DB geometry tightened (height_pct up) to reduce over-firing; short confirm windows keep signals timely.
+- **Ensembles/abstention (in progress):** We started emitting per-pattern probabilities and LF vote counts (DT/DB) and allowing abstain (`y=-1`) when votes are ambiguous. Next steps: expand LFs per pattern and combine multiple signals instead of a single hard decision.
 - **Alignment checks:** `scripts/validate_detectors.py` compares our detections to a TA ZigZag baseline and emits CSV + JSON (`reports/validation/detector_audit.*`) with only-ours/only-TA counts per pattern/symbol. Use agreement rates and confirm rates each run to spot over/under-fire and guide tuning.
 
 When adjusting:
 - Geometry: height_pct, min_height_atr, symmetry.
 - Confirmation: percent/ATR break, within_bars, volume multiplier (per symbol).
 - If a class floods, tighten geometry/confirmation; if it vanishes, ease timing/height or allow pre-breakout flags while training on confirmed.
+- For ensembles: tune LF weights, thresholds for p (e.g., p ≥ 0.9 → positive, p ≤ 0.1 → negative, else abstain), and monitor LF agreement in the validator report.
 
