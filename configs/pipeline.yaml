@@ -1,0 +1,75 @@
+meta:
+  comment: "End-to-end labeling + feature extraction pipeline config"
+
+labeling:
+  swing_points:
+    window: 4
+    min_distance_bars: 4
+    prominence_atr: 0.9
+    atr_period: 14
+  patterns:
+    head_and_shoulders:
+      geometry:
+        duration:
+          min_bars: 40
+          max_bars: 180
+        head_above_shoulders_min_atr: 0.6        # allow moderate heads (still > half an ATR above shoulders)
+        head_above_shoulders_min_pct: 0.0055     # small relax on percent threshold
+        shoulder_height_similarity_pct: 35       # shoulders within ±35% height difference
+        shoulder_timing_similarity_pct: 75       # broader timing window but still structured
+        neckline:
+          max_slope_deg: 18                     # modestly sloped necklines allowed
+      breakout:
+        side: "down"
+        confirm:
+          threshold_atr: 0.10                  # 0.10×ATR break still meaningful
+          threshold_percent: 0.06              # parallel percent relax
+          within_bars: 18                      # allow more time for the break to occur
+    ascending_triangle:
+      geometry:
+        duration:
+          min_bars: 30
+          max_bars: 150
+        max_peak_diff_pct: 0.01
+        max_resistance_slope_deg: 8
+        min_support_slope_deg: 10
+        min_lows: 2
+      breakout:
+        side: "up"
+        max_time_to_break_pct: 0.75
+        confirm:
+          threshold_atr: 0.1
+          threshold_percent: 0.05
+
+features:
+  ta:
+    atr_period: 14
+    roc_periods: [5, 10, 20]
+    ma_periods: [10, 20, 50]
+  candles:
+    enabled: true
+  swings:
+    enabled: true
+    pivot_left: 3
+    pivot_right: 3
+    pivot_min_sep: 4
+  pattern_proxies:
+    enabled: true
+
+cv_features:
+  hough:
+    canny_low: 40
+    canny_high: 140
+    hough_rho: 1.0
+    hough_theta_deg: 1.0
+    hough_threshold: 70
+
+dataset:
+  manifest_path: "reports/runs/latest/render_manifest.json"
+
+models:
+  random_forest:
+    n_estimators: 600
+    max_depth: null
+    min_samples_leaf: 2
+    random_state: 42

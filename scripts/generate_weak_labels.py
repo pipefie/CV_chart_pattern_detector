@@ -11,6 +11,14 @@ from scipy.signal import find_peaks
 import math
 import cv2 as cv
 
+"""
+⚠️  Deprecated:
+    This script is kept for historical reference only. The active labeling pipeline
+    now lives under `src/labeling/` (swing_points.py, patterns_hs.py, patterns_triangles.py,
+    labeler.py) and is orchestrated via the dataset builder in `src/features/dataset.py`.
+    Do not modify or extend this file—implement new logic in the modular labeling package.
+"""
+
 
 # ---------- Helpers ----------
 def load_yaml(p: Path) -> dict:
