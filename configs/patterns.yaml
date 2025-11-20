@@ -55,7 +55,7 @@ overrides:
       min_distance_bars: 10
     head_and_shoulders:
       geometry:
-        head_above_shoulders_min_atr: 1.0
+        head_above_shoulders_min_atr: 0.60
     double_top:
       breakout:
         confirm:
@@ -97,17 +97,17 @@ patterns:
     geometry:
       required_peaks: 3
       order: "peak-valley-peak-valley-peak"
-      head_above_shoulders_min_atr: 0.55  # modest relaxation, still needs clear head
+      head_above_shoulders_min_atr: 0.50  # modest relaxation, still needs clear head
       head_above_shoulders_min_pct: 0.007
       min_height_atr: 0.9                  # modest floor to avoid micro-patterns
       shoulder_height_similarity_pct: 25
-      shoulder_timing_similarity_pct: 60   # soften timing to recover positives
+      shoulder_timing_similarity_pct: 70   # soften timing to recover positives
       neckline:
         type: "line"
         max_slope_deg: 12
         max_rmsd_pct_of_height: 0.4
       duration:
-        min_bars: 36
+        min_bars: 28
         max_bars: 200
     breakout:
       side: "down"
@@ -115,7 +115,7 @@ patterns:
         type: "close_beyond_line"
         threshold_atr: 0.10         # softer break to recover positives
         threshold_percent: 0.10
-        within_bars: 10
+        within_bars: 14
     invalidation:
       closes_back_above_neckline_within_bars: 10
       right_shoulder_exceeds_head_atr: 0.25

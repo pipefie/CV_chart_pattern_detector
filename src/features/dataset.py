@@ -272,7 +272,10 @@ def samples_from_labels_csv(labels_csv: Path, images_root: Path) -> Iterator[Sam
 
 def samples_from_manifest(manifest_path: Path) -> Iterator[Sample]:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    out_root = Path(manifest["outputs"]["out_root"])
+    out_root_raw = manifest["outputs"]["out_root"]
+    out_root = Path(out_root_raw)
+    if "\\" in out_root_raw and not out_root.exists():
+        out_root = Path(out_root_raw.replace("\\", "/"))
     if not out_root.is_absolute():
         candidate = (manifest_path.parent / out_root).resolve()
         if candidate.exists():

@@ -2,6 +2,10 @@ meta:
   comment: "End-to-end labeling + feature extraction pipeline config"
 
 labeling:
+  units:
+    prefer_atr_over_percent: true
+  labels_post:
+    dedup_time_overlap_bars: 10
   swing_points:
     window: 4
     min_distance_bars: 4
@@ -40,6 +44,65 @@ labeling:
         confirm:
           threshold_atr: 0.1
           threshold_percent: 0.05
+    double_top:
+      geometry:
+        peaks: 2
+        peak_height_similarity_pct: 8
+        min_height_atr: 0.9
+        valley_required: true
+        valley_drop_min_atr: 1.0
+        valley_drop_min_pct: 0.012
+        valley_min_bars_from_peaks: 3
+        max_pairs_per_peak: 5
+        dynamic_thresholds:
+          valley_drop_min_height_pct: 15
+          breakout_height_pct: 7
+          atr_floor_mult: 0.5
+          vol_lookback_bars: 36
+        duration:
+          min_bars: 24
+          max_bars: 110
+      breakout:
+        side: "down"
+        require_confirmation: true
+        confirm:
+          threshold_atr: 0.6
+          threshold_percent: 0.25
+          within_bars: 16
+          volume_mult: 1.1
+      label_allow_pre_breakout: false
+      scoring:
+        weight_valley_depth_atr: 1.0
+        weight_span: 0.4
+    double_bottom:
+      geometry:
+        peak_height_similarity_pct: 8
+        min_height_atr: 0.9
+        valley_required: true
+        peak_rise_min_atr: 1.0
+        peak_rise_min_pct: 0.012
+        valley_min_bars_from_peaks: 3
+        max_pairs_per_peak: 5
+        dynamic_thresholds:
+          valley_drop_min_height_pct: 15
+          breakout_height_pct: 7
+          atr_floor_mult: 0.5
+          vol_lookback_bars: 36
+        duration:
+          min_bars: 24
+          max_bars: 110
+      breakout:
+        side: "up"
+        require_confirmation: true
+        confirm:
+          threshold_atr: 0.6
+          threshold_percent: 0.25
+          within_bars: 16
+          volume_mult: 1.1
+      label_allow_pre_breakout: false
+      scoring:
+        weight_valley_depth_atr: 1.0
+        weight_span: 0.4
 
 features:
   ta:

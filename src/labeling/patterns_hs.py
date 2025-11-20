@@ -39,7 +39,12 @@ def _neckline_slope_deg(v1_idx: int, v1_price: float, v2_idx: int, v2_price: flo
     return float(np.degrees(np.arctan(slope)))
 
 
-def detect_hs_pattern(df: pd.DataFrame, swings: pd.DataFrame, config: Dict | None) -> List[Dict]:
+def detect_hs_pattern(
+    df: pd.DataFrame,
+    swings: pd.DataFrame,
+    config: Dict | None,
+    diagnostics: Dict | None = None,
+) -> List[Dict]:
     """
     Scan swing points and identify head & shoulders candidates.
 
@@ -69,6 +74,29 @@ def detect_hs_pattern(df: pd.DataFrame, swings: pd.DataFrame, config: Dict | Non
     closes = df["close"].to_numpy(dtype=float)
     index_positions = {idx: pos for pos, idx in enumerate(df.index)}
 
+    diag = diagnostics
+
+    def diag_set(key: str, value: float | int) -> None:
+        if diag is not None:
+            diag[key] = value
+
+    def diag_inc(key: str, amount: float = 1) -> None:
+        if diag is not None:
+            diag[key] = diag.get(key, 0) + amount
+
+    diag_set("candidate_sequences", 0)
+    diag_set("reject_duration", 0)
+    diag_set("reject_head_prominence", 0)
+    diag_set("reject_shoulder_similarity", 0)
+    diag_set("reject_time_symmetry", 0)
+    diag_set("reject_neckline_slope", 0)
+    diag_set("detections", 0)
+    diag_set("breakout_confirmed", 0)
+    swing_highs = int(swings["swing_high"].sum()) if "swing_high" in swings else 0
+    swing_lows = int(swings["swing_low"].sum()) if "swing_low" in swings else 0
+    diag_set("swing_highs", swing_highs)
+    diag_set("swing_lows", swing_lows)
+
     events: List[Tuple[int, str, float]] = []
     for pos, (ts, row) in enumerate(swings.iterrows()):
         if row.get("swing_high"):
@@ -80,14 +108,18 @@ def detect_hs_pattern(df: pd.DataFrame, swings: pd.DataFrame, config: Dict | Non
             price = float(val) if val == val else float(df["low"].iloc[pos])
             events.append((pos, "low", price))
 
+    diag_set("swing_events", len(events))
+
     detections: List[Dict] = []
     for i in range(len(events) - 4):
         seq = events[i : i + 5]
         pattern = [typ for _, typ, _ in seq]
         if pattern != ["high", "low", "high", "low", "high"]:
             continue
+        diag_inc("candidate_sequences")
         (p1_idx, _, p1_price), (v1_idx, _, v1_price), (p2_idx, _, p2_price), (v2_idx, _, v2_price), (p3_idx, _, p3_price) = seq
         if not (min_bars <= (p3_idx - p1_idx) <= max_bars):
+            diag_inc("reject_duration")
             continue
         head = p2_price
         shoulders = [p1_price, p3_price]
@@ -101,10 +133,12 @@ def detect_hs_pattern(df: pd.DataFrame, swings: pd.DataFrame, config: Dict | Non
             head_min_atr * atr_mean,
             head_min_pct * max(shoulder_mid, 1e-6),
         ):
+            diag_inc("reject_head_prominence")
             continue
 
         shoulder_sim = abs(shoulders[0] - shoulders[1]) / max(shoulder_mid, 1e-6)
         if shoulder_sim > shoulder_sim_pct:
+            diag_inc("reject_shoulder_similarity")
             continue
 
         # temporal symmetry: compare spacing left vs right shoulder
@@ -113,11 +147,13 @@ def detect_hs_pattern(df: pd.DataFrame, swings: pd.DataFrame, config: Dict | Non
         total = max((p3_idx - p1_idx), 1)
         time_sym = 1.0 - abs(ls_width - rs_width) / total
         if time_sym < shoulder_time_pct:
+            diag_inc("reject_time_symmetry")
             continue
 
         # neckline slope constraint
         neck_deg = abs(_neckline_slope_deg(v1_idx, v1_price, v2_idx, v2_price))
         if neck_deg > max_neckline_deg:
+            diag_inc("reject_neckline_slope")
             continue
 
         # breakout
@@ -165,12 +201,20 @@ def detect_hs_pattern(df: pd.DataFrame, swings: pd.DataFrame, config: Dict | Non
                 "span_bars": int(p3_idx - p1_idx),
             }
         )
+        diag_inc("detections")
+        if breakout_ok:
+            diag_inc("breakout_confirmed")
 
     LOG.debug("H&S detections=%d", len(detections))
     return detections
 
 
-def label_hs_window(df: pd.DataFrame, swings: pd.DataFrame, config: Dict | None) -> Tuple[int, Dict]:
+def label_hs_window(
+    df: pd.DataFrame,
+    swings: pd.DataFrame,
+    config: Dict | None,
+    diagnostics: Dict | None = None,
+) -> Tuple[int, Dict]:
     """
     Compute a binary H&S label plus structural features.
 
@@ -178,7 +222,7 @@ def label_hs_window(df: pd.DataFrame, swings: pd.DataFrame, config: Dict | None)
     -------
     (y, features_dict)
     """
-    detections = detect_hs_pattern(df, swings, config)
+    detections = detect_hs_pattern(df, swings, config, diagnostics=diagnostics)
     if not detections:
         return 0, {
             "hs_neckline_slope_deg": 0.0,

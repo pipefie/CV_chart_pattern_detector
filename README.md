@@ -242,3 +242,299 @@ the script does the following for every rendered chart:
 | Targets                 | `y_head_and_shoulders`, `y_ascending_triangle`     | 1 if the window satisfies the rule-based definition, else 0.                   |
 
 This process is deterministic: the same manifest + config will always yield the same labels/features. If you need more positives (e.g., only 2 H&S positives in `train`), tweak `configs/pipeline.yaml -> labeling` or render windows focusing on periods where those patterns occur more frequently before rerunning the pipeline.
+
+
+## Head & Shoulders Labeling Pipeline (Regime Scan → Heuristic Labeler → Rendering)
+
+This project deliberately avoids Deep Learning. All pattern detection is based on:
+
+  1. Heuristic rules on OHLCV (swings, geometry, breakouts), and
+
+  2. Classical Computer Vision on rendered charts (edges, Hough lines, etc.).
+
+Because of that, the quality of our labels is absolutely critical: if the labeler is weak or noisy, every model we build on top of it will be garbage.
+
+Originally, the labeling logic was embedded directly in the rendering / image pipeline and/or in weak supervision rules. That led to several problems:
+
+  - Labels were often collapsed (almost all 0 or almost all 1 for some patterns).
+
+  - It was hard to debug why a specific window was considered a pattern or not.
+
+  - The same heuristics were being re-implemented in different places.
+
+To fix this, we introduced a two-stage pipeline for Head & Shoulders (H&S):
+
+  1. Regime scan on OHLCV → “where could an H&S even exist?”
+
+  2. Heuristic H&S labeler → “does this specific window satisfy the H&S geometry?”
+
+Only after those two steps do we render images and do any CV-based feature extraction.
+
+### 1. OHLCV storage
+
+All raw price data lives as Parquet files under data/ohlcv:
+
+data/ohlcv/
+  crypto/
+    BTC-USD.parquet
+    ETH-USD.parquet
+  equities_etf/
+    AAPL.parquet
+    AMZN.parquet
+    SPY.parquet
+    QQQ.parquet
+    TSLA.parquet
+    NVDA.parquet
+
+
+Each Parquet file contains 1-hour bars (for now) with:
+
+  - a DatetimeIndex (timestamps),
+
+  - columns: open, high, low, close, volume.
+
+This is the single source of truth for price data. All later steps slice these Parquets by row index.
+
+### 2. Regime scanner: scripts/scan_hs_regimes.py
+
+Goal: do not try to detect patterns on the whole history. Instead, first find windows where the market regime is compatible with an H&S.
+
+H&S is a reversal pattern:
+
+  - It needs a prior trend (for classic H&S, a prior uptrend).
+
+  - It needs enough volatility to be visually recognizable.
+
+scan_hs_regimes.py:
+
+  - Loads OHLCV per symbol from Parquet.
+
+  - Slides a window of fixed length (e.g. 100 bars) over the series:
+    [start_idx, end_idx) with step bars between windows.
+
+  - For each window, it computes:
+
+    - a simple trend proxy (slope of log-prices in the first half of the window),
+
+    - a simple volatility proxy (std of log returns in the whole window).
+
+If both trend and volatility are above thresholds, we flag this window as “regime favorable for H&S”. This does not mean there is a pattern there; it just means it’s worth running the real H&S labeler.
+
+The output is:
+
+data/labels/hs_candidates.csv
+
+
+with columns like:
+
+  - symbol
+
+  - timeframe (currently "1h" as a tag)
+
+  - start_idx, end_idx (row indices into the Parquet)
+
+  - start_ts, end_ts (timestamps for logging / sanity)
+
+  - window (bars per window)
+
+  - hs_type (top / inverse / both)
+
+  - regime_favorable_for_hs (bool flag)
+
+This step spreads our compute budget intelligently: instead of scanning millions of bars blindly, we focus H&S detection on a few thousand candidate windows that already have the right “energy” (trend + vol).
+
+### 3. Geometric H&S labeler: src/labeling/patterns_hs.py + scripts/label_hs_candidates.py
+
+Once we have hs_candidates.csv, we still need to answer:
+
+  “In this specific window, is there actually a Head & Shoulders according to our rules?”
+
+The H&S logic itself lives in:
+
+  src/labeling/patterns_hs.py
+
+with two key functions:
+
+  - detect_hs_pattern(df, swings, config)
+    Scans swing points looking for sequences of 5 events:
+
+    high → low → high → low → high
+
+
+    that fit the H&S structure (P1–V1–P2–V2–P3) and respect the YAML-defined geometry.
+
+  - label_hs_window(df, swings, config)
+    Wraps detect_hs_pattern:
+
+      - returns a binary label y (0/1),
+
+      - plus a dictionary of structural features such as:
+
+        neckline slope in degrees,
+
+        head-to-shoulder height ratio,
+
+        shoulder similarity,
+
+        temporal symmetry between shoulders,
+
+        whether a breakout was confirmed and within how many bars,
+
+        total span in bars.
+
+The configuration (config) is not hard-coded. It is loaded from the YAML config (e.g. configs/patterns.yaml):
+
+min_bars / max_bars for the pattern span,
+
+max allowed neckline slope,
+
+max allowed difference between shoulder heights,
+
+min required head prominence above the shoulders (in ATR units and/or %),
+
+breakout rules (direction, within N bars, threshold in ATR / %).
+
+The new script:
+
+scripts/label_hs_candidates.py
+
+does the wiring:
+
+Reads hs_candidates.csv.
+
+For each row:
+
+Loads the full OHLCV for that symbol from Parquet.
+
+Extracts the window [start_idx:end_idx] into a small DataFrame.
+
+Computes swing points for that window (using the project’s swing logic, not a random ad-hoc detector).
+
+Calls label_hs_window(window_df, swings, config_from_yaml_for_HS).
+
+Writes a new CSV:
+
+data/labels/hs_labeled.csv
+
+
+containing:
+
+all original candidate fields, plus
+
+y_hs (0/1),
+
+hs_neckline_slope_deg,
+
+hs_head_to_shoulder_ratio,
+
+hs_shoulder_similarity,
+
+hs_temporal_symmetry,
+
+hs_breakout_confirmed,
+
+hs_span_bars.
+
+This hs_labeled.csv is the canonical ground truth for H&S used later by the rendering + CV + ML pipeline.
+
+4. Why we’re doing it this way (and what we’re struggling with)
+
+We’re doing this because earlier attempts at labeling patterns had serious issues:
+
+The labelers were tied to specific scripts or rendering flows, so they were hard to reuse.
+
+Some weak supervision heuristics produced degenerate labels (e.g. almost all ones or almost all zeros).
+
+Debugging “why this window was labeled 1/0” was painful.
+
+This new pipeline separates concerns clearly:
+
+Regime scan (cheap, broad, approximate) → “where might patterns live?”
+
+Geometric labeler (expensive, strict, config-driven) → “is this really an H&S?”
+
+The main things we’re still struggling / iterating on:
+
+Swing detection vs. strict geometry
+If swing detection is too crude or too sparse, or if the YAML thresholds are too strict, it’s easy to end up with no detections at all (all y_hs = 0 even in promising windows).
+This is a sign that we need to:
+
+refine swing points (maybe using swing_points.py more carefully), and/or
+
+relax some H&S thresholds in the YAML (neckline slope, shoulder similarity, head prominence) until we have a reasonable number of positive labels.
+
+Balance between purity and dataset size
+For the ML part (Random Forest on geometric + CV features) we need:
+
+enough positive H&S examples,
+
+plus a balanced set of negative windows from similar regimes.
+Being too strict yields a “pure but empty” dataset; being too lax yields noisy labels. We’re iterating to find a middle ground that gives:
+
+non-trivial number of H&S labels, and
+
+reasonably interpretable patterns.
+
+Aligning configuration
+The H&S heuristics and thresholds live in a central YAML.
+All scripts (scanner, labeler, renderer, feature builder) must read from this config instead of hard-coding magic numbers. A lot of the current work is about wiring everything to the same YAML so the behavior is consistent and changes are traceable.
+
+5. How this feeds into the rest of the project
+
+Once hs_labeled.csv is in a good place (non-empty, config-driven, debugged), the next steps are:
+
+Select windows to render:
+
+all positives (y_hs == 1),
+
+a controlled sample of negatives (y_hs == 0) per symbol/timeframe.
+
+Render charts for those windows using the existing rendering pipeline (candles, fixed DPI, consistent styling) and track them in DVC.
+
+Standardize images with src/standardize/standardize_images.py:
+
+Canny → edges,
+
+morphology → clean shapes,
+
+Hough transform → detect dominant lines.
+
+Build features:
+
+CV features from Hough (line counts, angle distribution, strength of dominant lines),
+
+plus structural features from the labeler (neckline slope, head/shoulder ratio, etc.),
+
+plus optional indicators (RSI, volume stats).
+
+Train & evaluate models (e.g. Random Forest) on these features to predict y_hs.
+
+The entire point of this pipeline is to have a transparent, reproducible, explainable path from:
+
+raw OHLCV → regime-filtered windows → heuristic H&S labels → rendered images → CV features → classical ML.
+
+No deep learning, no black boxes: every step is inspectable and driven by the same configuration file.
+
+## 2025-11 H&S candidate tuning recap
+
+Recent work focused on turning the `scan_hs_regimes.py → label_hs_candidates.py` pipeline into a practical way to harvest clean Head & Shoulders labels:
+
+1. **Why two scripts?**
+   - `scan_hs_regimes.py` carves out windows that already exhibit trend + volatility, cutting the search space from millions of bars to ~1k promising slices.
+   - `label_hs_candidates.py` reuses the canonical swing detector and YAML heuristics so the same rulebook drives both this intermediate labeler and the final dataset builder. It also caches OHLCV per symbol and emits structural features + diagnostics.
+
+2. **What was broken?**
+   - Early runs yielded 0 positives because we were feeding the H&S detector naive swings and `config=None`. Crypto overrides were also out-of-sync, demanding ≥1 ATR of head prominence.
+   - Lack of diagnostics made it impossible to tell *why* a candidate failed (span too short? shoulders unequal? breakout missing?).
+
+3. **Fixes that brought it back to life:**
+   - Wired the labeler to `src/labeling/swing_points.py` and `configs/patterns.yaml`, including per-symbol overrides.
+   - Added instrumentation (`hs_diag_*` columns) and a summary CSV so every rejection reason is traceable.
+   - Relaxed duration and prominence thresholds in line with classic TA (min span 28 bars ≈ 1.2 trading days on 1h charts, head prominence ≈ 0.5–0.6 ATR depending on asset).
+
+4. **Where we landed:**
+   - `data/labels/hs_labeled.csv` now contains 24 positives across AMZN, NVDA, ETH, QQQ, and TSLA out of 1,239 regime-filtered windows.
+   - `data/labels/hs_labeled_diagnostics.csv` captures per-symbol totals (candidate sequences, rejection counts, detections, breakout confirmations) so future tweaks remain data-driven.
+   - These CSVs feed directly into the render/standardize/feature pipeline described above; you can filter on `y_hs=1` to enumerate the exact windows to render or standardize.
+
+Anyone—regardless of finance background—can follow this flow: find regimes with energy, apply the same geometric rules everywhere, log why each window passed or failed, and only then render and featurize the winners.
