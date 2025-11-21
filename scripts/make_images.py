@@ -252,7 +252,18 @@ def main():
     if args.windows_csv:
         jobs = pd.read_csv(args.windows_csv)
         if args.windows_filter_col and args.windows_filter_col in jobs.columns and args.windows_filter_value is not None:
-            jobs = jobs[jobs[args.windows_filter_col] == args.windows_filter_value]
+            col = args.windows_filter_col
+            val = args.windows_filter_value
+            series = jobs[col]
+            # Try to coerce filter value to column dtype (handles numeric labels like y_hs=1)
+            try:
+                if pd.api.types.is_numeric_dtype(series):
+                    val_coerced = float(val)
+                    jobs = jobs[series.astype(float) == val_coerced]
+                else:
+                    jobs = jobs[series.astype(str) == str(val)]
+            except Exception:
+                jobs = jobs[series.astype(str) == str(val)]
         if jobs.empty:
             print("⚠️ No windows to render after filtering.")
             return
