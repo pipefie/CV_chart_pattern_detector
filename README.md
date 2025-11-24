@@ -538,3 +538,74 @@ Recent work focused on turning the `scan_hs_regimes.py → label_hs_candidates.p
    - These CSVs feed directly into the render/standardize/feature pipeline described above; you can filter on `y_hs=1` to enumerate the exact windows to render or standardize.
 
 Anyone—regardless of finance background—can follow this flow: find regimes with energy, apply the same geometric rules everywhere, log why each window passed or failed, and only then render and featurize the winners.
+
+## Latest deterministic build (Nov 2025)
+We folded the legacy double-top/bottom detectors into the deterministic pipeline, relaxed H&S heuristics to recover coverage, and aligned rendering/standardization with the manifest-driven feature builder.
+
+What changed:
+- Added `double_top` / `double_bottom` detectors to `src/labeling/` and `PatternLabeler`; `configs/pipeline.yaml` now carries their geometry/breakout rules, so `build_features.py` emits `y_double_top` / `y_double_bottom` alongside H&S and triangles.
+- Relaxed H&S in `configs/pipeline.yaml` (min span 24 bars, head prominence ≈0.45 ATR / 0.0045 pct, breakout 0.08 ATR / 22 bars) to surface more positives while staying TA-plausible. The deterministic build now has ~150 H&S positives spread across train/val/test.
+- Made `scripts/make_images.py` accept `--windows_csv` so you can render specific windows (e.g., `hs_labeled_with_split.csv` with `y_hs=1`) into the appropriate split folders; existing PNGs are preserved.
+- Manifests remain metadata only: `scripts/write_render_manifest.py` records hashes/params and points to the render root; it does not render or delete images.
+
+How to go from labels to features (step-by-step):
+1. **Render (or append) windows**  
+   - To render specific positives with splits (e.g., H&S):  
+     ```bash
+     uv run python scripts/make_images.py \
+       --windows_csv data/labels/hs_labeled_with_split.csv \
+       --windows_filter_col y_hs --windows_filter_value 1 \
+       --windows_split_col split \
+       --out_root data/images/rendered
+     ```
+   - Otherwise, render the full walk-forward grid via `scripts/make_images.py` with `--backtest_cfg/--render_cfg`.
+
+2. **Standardize images** (required before feature extraction):  
+   ```bash
+   uv run python src/standardize/standardize_images.py \
+     --inp data/images/rendered --out data/images/standardized
+   ```
+   (You can target per-split folders if preferred.)
+
+3. **Write a manifest** pointing at the render root:  
+   ```bash
+   uv run python scripts/write_render_manifest.py \
+     --out_root data/images/rendered \
+     --backtest configs/backtest.yaml \
+     --render configs/render.yaml \
+     --patterns configs/patterns.yaml \
+     --window_bars 160 --stride_bars 40 --seed 42
+   ```
+   This creates `reports/runs/<run_id>/render_manifest.json` covering everything under `out_root`.
+
+4. **Build features + deterministic labels** using standardized images and the manifest:  
+   ```bash
+   uv run python scripts/build_features.py \
+     --pipeline_cfg configs/pipeline.yaml \
+     --manifest reports/runs/<run_id>/render_manifest.json \
+     --ohlcv_root data/ohlcv \
+     --images_root data/images/standardized \
+     --out_dir data/features
+   ```
+   The builder instantiates `PatternLabeler` (H&S, ascending triangles, double top/bottom), computes structural TA features, and merges CV Hough stats. Outputs: `train/val/test/all_features.csv`.
+
+5. **Train/evaluate models** (e.g., Random Forest) using the feature CSVs; account for class imbalance (DT/DB are dense, H&S/triangles sparser).
+
+If you need to inject curated labels instead of the deterministic ones, you can pass `--labels_csv data/labels/hs_labeled_with_split.csv` to `build_features.py`, but the recommended path is to tune the YAML so the deterministic pass reflects your TA rules.
+
+## Suggested next steps
+1. Run `build_features.py` with the relaxed H&S config (already done) and inspect label counts per split; they should show H&S coverage across train/val/test (~150 positives total).
+2. If DT/DB density is too high for your model, tighten their YAML (height/breakout thresholds) or downsample during training.
+3. Train/evaluate per-pattern models (`scripts/train_rf.py` or notebooks), using class weights or sampling to address imbalance.
+4. Keep diagnostics on during future H&S tuning; only adjust YAML thresholds, not hard-coded values, so changes stay traceable.
+
+## CV feature expansion (Hough + handcrafted)
+To keep the project “classical CV” while adding useful image cues, we expanded the Hough-based extractor:
+- **Edges/entropy:** Canny edge density and pixel entropy to gauge texture/noise.
+- **Hough lines:** Counts, angle stats, accumulator strength, angle differences, and fractions of horizontal/up/down lines.
+- **HOG summaries:** Mean/std/max of HOG descriptors (windowed) for shape texture.
+- **Gradient histograms:** Orientation histograms (0–180°) weighted by gradient magnitude.
+- **Contours:** Count and area stats of external contours.
+- **Simple H&S template match:** 1D column profile correlation against a synthetic shoulder–head–shoulder pattern.
+
+All of these live in `src/features/cv_hough.py` via `extract_cv_features` (aliased to `extract_hough_features` for compatibility). The pipeline reads CV params from `configs/pipeline.yaml -> cv_features.hough` (e.g., Canny thresholds, Hough rho/theta/threshold, HOG window, grad bins, template width) and merges these into the feature CSVs. You just need `cv2` installed; no deep models are used. After updating, rerun `build_features.py` to populate the new `cv_*` columns.***

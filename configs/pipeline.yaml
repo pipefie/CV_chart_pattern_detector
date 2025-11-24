@@ -15,20 +15,20 @@ labeling:
     head_and_shoulders:
       geometry:
         duration:
-          min_bars: 40
+          min_bars: 24
           max_bars: 180
-        head_above_shoulders_min_atr: 0.6        # allow moderate heads (still > half an ATR above shoulders)
-        head_above_shoulders_min_pct: 0.0055     # small relax on percent threshold
-        shoulder_height_similarity_pct: 35       # shoulders within ±35% height difference
-        shoulder_timing_similarity_pct: 75       # broader timing window but still structured
+        head_above_shoulders_min_atr: 0.45        # allow heads ~0.5 ATR above shoulders
+        head_above_shoulders_min_pct: 0.0045
+        shoulder_height_similarity_pct: 35
+        shoulder_timing_similarity_pct: 75
         neckline:
-          max_slope_deg: 18                     # modestly sloped necklines allowed
+          max_slope_deg: 18
       breakout:
         side: "down"
         confirm:
-          threshold_atr: 0.10                  # 0.10×ATR break still meaningful
-          threshold_percent: 0.06              # parallel percent relax
-          within_bars: 18                      # allow more time for the break to occur
+          threshold_atr: 0.08
+          threshold_percent: 0.05
+          within_bars: 22
     ascending_triangle:
       geometry:
         duration:
@@ -48,16 +48,16 @@ labeling:
       geometry:
         peaks: 2
         peak_height_similarity_pct: 8
-        min_height_atr: 0.9
+        min_height_atr: 1.1           # require taller structures
         valley_required: true
-        valley_drop_min_atr: 1.0
-        valley_drop_min_pct: 0.012
+        valley_drop_min_atr: 1.2
+        valley_drop_min_pct: 0.015
         valley_min_bars_from_peaks: 3
         max_pairs_per_peak: 5
         dynamic_thresholds:
-          valley_drop_min_height_pct: 15
-          breakout_height_pct: 7
-          atr_floor_mult: 0.5
+          valley_drop_min_height_pct: 18
+          breakout_height_pct: 9
+          atr_floor_mult: 0.6
           vol_lookback_bars: 36
         duration:
           min_bars: 24
@@ -66,10 +66,10 @@ labeling:
         side: "down"
         require_confirmation: true
         confirm:
-          threshold_atr: 0.6
-          threshold_percent: 0.25
-          within_bars: 16
-          volume_mult: 1.1
+          threshold_atr: 0.8
+          threshold_percent: 0.30
+          within_bars: 14
+          volume_mult: 1.2
       label_allow_pre_breakout: false
       scoring:
         weight_valley_depth_atr: 1.0
@@ -77,16 +77,16 @@ labeling:
     double_bottom:
       geometry:
         peak_height_similarity_pct: 8
-        min_height_atr: 0.9
+        min_height_atr: 1.1
         valley_required: true
-        peak_rise_min_atr: 1.0
-        peak_rise_min_pct: 0.012
+        peak_rise_min_atr: 1.2
+        peak_rise_min_pct: 0.015
         valley_min_bars_from_peaks: 3
         max_pairs_per_peak: 5
         dynamic_thresholds:
-          valley_drop_min_height_pct: 15
-          breakout_height_pct: 7
-          atr_floor_mult: 0.5
+          valley_drop_min_height_pct: 18
+          breakout_height_pct: 9
+          atr_floor_mult: 0.6
           vol_lookback_bars: 36
         duration:
           min_bars: 24
@@ -95,10 +95,10 @@ labeling:
         side: "up"
         require_confirmation: true
         confirm:
-          threshold_atr: 0.6
-          threshold_percent: 0.25
-          within_bars: 16
-          volume_mult: 1.1
+          threshold_atr: 0.8
+          threshold_percent: 0.30
+          within_bars: 14
+          volume_mult: 1.2
       label_allow_pre_breakout: false
       scoring:
         weight_valley_depth_atr: 1.0
@@ -126,6 +126,10 @@ cv_features:
     hough_rho: 1.0
     hough_theta_deg: 1.0
     hough_threshold: 70
+    hough_horizontal_deg: 10
+    grad_bins: 9
+    hog_win: 64
+    template_width: 64
 
 dataset:
   manifest_path: "reports/runs/latest/render_manifest.json"

@@ -13,7 +13,7 @@ import yaml
 from src.labeling import PatternLabeler
 from src.labeling.swing_points import compute_atr as labeling_atr
 
-from .cv_hough import extract_hough_features
+from .cv_hough import extract_cv_features
 
 LOG = logging.getLogger(__name__)
 
@@ -344,7 +344,7 @@ class DatasetBuilder:
         if (self.feature_cfg.get("pattern_proxies") or {}).get("enabled", True):
             feats.update(features_pattern_proxies(win))
         if self.cv_cfg:
-            feats.update(extract_hough_features(png_path, self.cv_cfg))
+            feats.update(extract_cv_features(png_path, self.cv_cfg))
         return feats
 
     def build(self) -> pd.DataFrame:
