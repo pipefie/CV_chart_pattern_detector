@@ -1,0 +1,18 @@
+{
+  "total_windows": 266,
+  "symbols_analyzed": 5,
+  "double_top_our_detections": 11,
+  "double_top_ta_detections": 145,
+  "double_top_detection_ratio": 0.07586206896551724,
+  "double_bottom_our_detections": 8,
+  "double_bottom_ta_detections": 90,
+  "double_bottom_detection_ratio": 0.08888888888888889,
+  "head_shoulders_our_detections": 0,
+  "head_shoulders_ta_detections": 0,
+  "head_shoulders_detection_ratio": 0.0,
+  "inverse_head_shoulders_our_detections": 0,
+  "inverse_head_shoulders_ta_detections": 0,
+  "inverse_head_shoulders_detection_ratio": 0.0,
+  "double_top_agreement": 0.07692307692307693,
+  "double_bottom_agreement": 0.015625
+}
