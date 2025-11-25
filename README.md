@@ -647,3 +647,10 @@ For controlled tuning without leakage, use the helper grid approach (see `script
 - Val metrics: ROC-AUC 0.808, PR-AUC 0.783, F1 0.752.
 - Test metrics: ROC-AUC 0.841, PR-AUC 0.889, F1 0.822 @ threshold 0.30.
 - Artifacts (stable): `reports/baselines/dt/model.joblib`, `reports/baselines/dt/train_manifest.json`, test metrics `reports/baselines/dt/metrics_20251125T113004Z.json`.
+
+### Double Bottom RF baseline (locked)
+- Grid sweep showed similar clustering; we chose a regularized setting.
+- Params: `min_samples_leaf=8`, `max_depth=12`, `n_estimators=600`, `class_weight=balanced`, `drop_structural=True`. Best threshold ≈ 0.30.
+- Val metrics: ROC-AUC 0.725, PR-AUC 0.772, F1 0.767.
+- Test metrics: ROC-AUC 0.820, PR-AUC 0.843, F1 0.807 @ threshold 0.30.
+- Artifacts: `reports/baselines/db/model.joblib`, `reports/baselines/db/train_manifest.json`, test metrics `reports/baselines/db/metrics_20251125T121303Z.json`.
