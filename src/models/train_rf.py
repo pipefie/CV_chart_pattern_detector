@@ -18,13 +18,18 @@ def load_features(path: str | Path) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
-def pick_xy(df: pd.DataFrame, target_col: str) -> Tuple[pd.DataFrame, pd.Series]:
+def pick_xy(df: pd.DataFrame, target_col: str, drop_structural: bool = True) -> Tuple[pd.DataFrame, pd.Series]:
     drop_like = ["image", "image_path", "split", "symbol", "timeframe", "start_ts", "end_ts"]
     drop_cols = set(drop_like)
     drop_cols.add(target_col)
     for col in df.columns:
         if col.startswith("y_") and col != target_col:
             drop_cols.add(col)
+    if drop_structural:
+        prefixes = ["hs_", "dt_", "db_", "tri_"]
+        for col in df.columns:
+            if any(col.startswith(p) for p in prefixes):
+                drop_cols.add(col)
     X = df.drop(columns=list(drop_cols), errors="ignore").select_dtypes(include=[np.number]).copy()
     y = df[target_col].astype(int).copy()
     return X, y
@@ -36,9 +41,10 @@ def train_random_forest(
     params: Dict,
     out_dir: Path,
     val_csv: Path | None = None,
+    drop_structural: bool = True,
 ) -> Dict:
     train_df = load_features(train_csv)
-    X_train, y_train = pick_xy(train_df, target)
+    X_train, y_train = pick_xy(train_df, target, drop_structural=drop_structural)
 
     rf_params = {
         "n_estimators": int(params.get("n_estimators", 600)),
@@ -52,10 +58,18 @@ def train_random_forest(
 
     scores: Dict[str, float] = {}
     feat_names = X_train.columns.tolist()
+    manifest_meta = {
+        "train_rows": len(train_df),
+        "val_rows": len(load_features(val_csv) if val_csv else []),
+        "features_used": len(feat_names),
+        "drop_structural": bool(drop_structural),
+        "target_positive_count": int(y_train.sum()),
+        "target_negative_count": int((y_train == 0).sum()),
+    }
 
     if val_csv:
         val_df = load_features(val_csv)
-        X_val, y_val = pick_xy(val_df, target)
+        X_val, y_val = pick_xy(val_df, target, drop_structural=drop_structural)
         rf.fit(X_train, y_train)
         probs = rf.predict_proba(X_val)[:, 1]
         scores["roc_auc"] = float(roc_auc_score(y_val, probs))
@@ -99,6 +113,7 @@ def train_random_forest(
         "val_csv": str(val_csv) if val_csv else None,
         "target": target,
         "params": rf_params,
+        "meta": manifest_meta,
         "scores": scores,
         "best_threshold": scores.get("best_threshold", 0.5),
         "feature_names": feat_names,

@@ -609,3 +609,41 @@ To keep the project “classical CV” while adding useful image cues, we expand
 - **Simple H&S template match:** 1D column profile correlation against a synthetic shoulder–head–shoulder pattern.
 
 All of these live in `src/features/cv_hough.py` via `extract_cv_features` (aliased to `extract_hough_features` for compatibility). The pipeline reads CV params from `configs/pipeline.yaml -> cv_features.hough` (e.g., Canny thresholds, Hough rho/theta/threshold, HOG window, grad bins, template width) and merges these into the feature CSVs. You just need `cv2` installed; no deep models are used. After updating, rerun `build_features.py` to populate the new `cv_*` columns.***
+
+## Training scripts vs modules
+- `src/models/train_rf.py` / `src/models/eval_rf.py` hold the core logic (load CSVs, drop non-feature columns, fit/evaluate scikit RFs, save models/manifests/metrics).
+- `scripts/train_rf.py` / `scripts/eval_rf.py` are thin CLI wrappers that parse args (including defaults from `configs/pipeline.yaml`) and call the module functions. Use the scripts on the CLI; import the modules in notebooks.
+
+### Making RF training more informative
+The RF fit itself is fast and silent, but you still get:
+- A printed ROC-AUC/PR-AUC/F1 when using a val split.
+- Saved `train_manifest.json` alongside `model.joblib` with params, scores, best threshold, and top feature importance.
+- Evaluation scripts write `metrics_*.json` and confusion matrices in `reports/eval/<target>/`.
+
+If you want more visibility during training, consider:
+- Adding a brief log of class balance and feature count at the start of `scripts/train_rf.py`.
+- Printing permutation importances (already attempted; saved in the manifest when val split is used).
+- For deeper inspection, run a notebook to plot PR curves/feature importances using the saved manifest and model.
+
+## Avoiding overfitting (H&S) and hyperparameter sweeps
+We hit “perfect” metrics on H&S when training on structural features (`hs_*`, `dt_*`, `db_*`, `tri_*`) because the RF simply memorized the deterministic labeler. To force learning from generic TA/CV cues:
+- Structural features are dropped by default in `src/models/train_rf.py` (pass `--keep_structural` to override).
+- `scripts/train_rf.py` now logs row counts, class balance, and whether structural features are kept.
+
+For controlled tuning without leakage, use the helper grid approach (see `scripts/grid_rf.py` example):
+- Loop over small grids of `min_samples_leaf`, `max_depth`, `n_estimators` with `class_weight=balanced` and `drop_structural=True`.
+- Call `train_random_forest` and `evaluate_random_forest` directly to capture val/test metrics per combo, and save a `grid_results.json` summary under `reports/runs/grid_rf_hs/`.
+- Pick the best hyperparams from the grid and re-run `scripts/train_rf.py` (still dropping structural features) to produce the final model/manifest. Record your choices and results here for future readers.
+
+### H&S RF baseline (locked)
+- Params: `min_samples_leaf=3`, `max_depth=16`, `n_estimators=800`, `class_weight=balanced`, `drop_structural=True`. Best threshold ≈ 0.60 (from val).
+- Val metrics: ROC-AUC 0.844, PR-AUC 0.467, F1 0.410.
+- Test metrics: ROC-AUC 0.916, PR-AUC 0.670, F1 0.615 @ threshold 0.60.
+- Artifacts (copied to a stable location): `reports/baselines/hs/model.joblib`, `reports/baselines/hs/train_manifest.json`, latest test metrics `reports/baselines/hs/metrics_20251125T101016Z.json`.
+
+### Double Top RF baseline (locked)
+- Grid sweep showed a tight cluster of high performers; we picked a conservative, slightly shallow option.
+- Params: `min_samples_leaf=3`, `max_depth=8`, `n_estimators=600`, `class_weight=balanced`, `drop_structural=True`. Best threshold ≈ 0.30.
+- Val metrics: ROC-AUC 0.808, PR-AUC 0.783, F1 0.752.
+- Test metrics: ROC-AUC 0.841, PR-AUC 0.889, F1 0.822 @ threshold 0.30.
+- Artifacts (stable): `reports/baselines/dt/model.joblib`, `reports/baselines/dt/train_manifest.json`, test metrics `reports/baselines/dt/metrics_20251125T113004Z.json`.

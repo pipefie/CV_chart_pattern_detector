@@ -1,8 +1,13 @@
 # scripts/train_rf.py
 from __future__ import annotations
 
-import argparse
+import sys
 from pathlib import Path
+
+# Ensure project root is on sys.path when running script directly
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import argparse
 import yaml
 
 from src.models.train_rf import train_random_forest
@@ -19,6 +24,7 @@ def main():
     ap.add_argument("--max_depth", type=int, default=None)
     ap.add_argument("--min_samples_leaf", type=int, default=None)
     ap.add_argument("--random_state", type=int, default=None)
+    ap.add_argument("--keep_structural", action="store_true", help="Keep structural pattern features (default drops hs_/dt_/db_/tri_ to reduce leakage).")
     args = ap.parse_args()
 
     defaults = {"n_estimators": 600, "max_depth": None, "min_samples_leaf": 1, "random_state": 42}
@@ -35,12 +41,23 @@ def main():
         "class_weight": "balanced",
     }
     val_csv = Path(args.val_csv) if args.val_csv else None
+    # Lightweight verbosity
+    train_df = None
+    try:
+        import pandas as pd  # optional, just for logging
+        train_df = pd.read_csv(args.train_csv)
+        target_pos = int(train_df[args.target].sum()) if args.target in train_df else 0
+        target_neg = len(train_df) - target_pos
+        print(f"[train_rf] Rows={len(train_df)} target={args.target} pos={target_pos} neg={target_neg} keep_structural={args.keep_structural}")
+    except Exception:
+        pass
     result = train_random_forest(
         train_csv=Path(args.train_csv),
         target=args.target,
         params=params,
         out_dir=Path(args.out_dir),
         val_csv=val_csv,
+        drop_structural=not args.keep_structural,
     )
     scores = result["manifest"]["scores"]
     print(f"✅ Saved model to {result['model_path']}")
