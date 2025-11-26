@@ -384,74 +384,74 @@ with two key functions:
 
 The configuration (config) is not hard-coded. It is loaded from the YAML config (e.g. configs/patterns.yaml):
 
-min_bars / max_bars for the pattern span,
+  min_bars / max_bars for the pattern span,
 
-max allowed neckline slope,
+  max allowed neckline slope,
 
-max allowed difference between shoulder heights,
+  max allowed difference between shoulder heights,
 
-min required head prominence above the shoulders (in ATR units and/or %),
+  min required head prominence above the shoulders (in ATR units and/or %),
 
-breakout rules (direction, within N bars, threshold in ATR / %).
+  breakout rules (direction, within N bars, threshold in ATR / %).
 
 The new script:
 
-scripts/label_hs_candidates.py
+  scripts/label_hs_candidates.py
 
-does the wiring:
+  does the wiring:
 
-Reads hs_candidates.csv.
+    Reads hs_candidates.csv.
 
-For each row:
+  For each row:
 
-Loads the full OHLCV for that symbol from Parquet.
+    Loads the full OHLCV for that symbol from Parquet.
 
-Extracts the window [start_idx:end_idx] into a small DataFrame.
+    Extracts the window [start_idx:end_idx] into a small DataFrame.
 
-Computes swing points for that window (using the project’s swing logic, not a random ad-hoc detector).
+    Computes swing points for that window (using the project’s swing logic, not a random ad-hoc detector).
 
-Calls label_hs_window(window_df, swings, config_from_yaml_for_HS).
+    Calls label_hs_window(window_df, swings, config_from_yaml_for_HS).
 
-Writes a new CSV:
+    Writes a new CSV:
 
-data/labels/hs_labeled.csv
+    data/labels/hs_labeled.csv
 
 
 containing:
 
 all original candidate fields, plus
 
-y_hs (0/1),
+  y_hs (0/1),
 
-hs_neckline_slope_deg,
+  hs_neckline_slope_deg,
 
-hs_head_to_shoulder_ratio,
+  hs_head_to_shoulder_ratio,
 
-hs_shoulder_similarity,
+  hs_shoulder_similarity,
 
-hs_temporal_symmetry,
+  hs_temporal_symmetry,
 
-hs_breakout_confirmed,
+  hs_breakout_confirmed,
 
-hs_span_bars.
+  hs_span_bars.
 
-This hs_labeled.csv is the canonical ground truth for H&S used later by the rendering + CV + ML pipeline.
+  This hs_labeled.csv is the canonical ground truth for H&S used later by the rendering + CV + ML pipeline.
 
-4. Why we’re doing it this way (and what we’re struggling with)
+### 4. Why we’re doing it this way (and what we’re struggling with)
 
 We’re doing this because earlier attempts at labeling patterns had serious issues:
 
-The labelers were tied to specific scripts or rendering flows, so they were hard to reuse.
+  The labelers were tied to specific scripts or rendering flows, so they were hard to reuse.
 
-Some weak supervision heuristics produced degenerate labels (e.g. almost all ones or almost all zeros).
+  Some weak supervision heuristics produced degenerate labels (e.g. almost all ones or almost all zeros).
 
-Debugging “why this window was labeled 1/0” was painful.
+  Debugging “why this window was labeled 1/0” was painful.
 
-This new pipeline separates concerns clearly:
+  This new pipeline separates concerns clearly:
 
-Regime scan (cheap, broad, approximate) → “where might patterns live?”
+    Regime scan (cheap, broad, approximate) → “where might patterns live?”
 
-Geometric labeler (expensive, strict, config-driven) → “is this really an H&S?”
+    Geometric labeler (expensive, strict, config-driven) → “is this really an H&S?”
 
 The main things we’re still struggling / iterating on:
 
@@ -479,7 +479,7 @@ Aligning configuration
 The H&S heuristics and thresholds live in a central YAML.
 All scripts (scanner, labeler, renderer, feature builder) must read from this config instead of hard-coding magic numbers. A lot of the current work is about wiring everything to the same YAML so the behavior is consistent and changes are traceable.
 
-5. How this feeds into the rest of the project
+### 5. How this feeds into the rest of the project
 
 Once hs_labeled.csv is in a good place (non-empty, config-driven, debugged), the next steps are:
 
@@ -593,11 +593,6 @@ How to go from labels to features (step-by-step):
 
 If you need to inject curated labels instead of the deterministic ones, you can pass `--labels_csv data/labels/hs_labeled_with_split.csv` to `build_features.py`, but the recommended path is to tune the YAML so the deterministic pass reflects your TA rules.
 
-## Suggested next steps
-1. Run `build_features.py` with the relaxed H&S config (already done) and inspect label counts per split; they should show H&S coverage across train/val/test (~150 positives total).
-2. If DT/DB density is too high for your model, tighten their YAML (height/breakout thresholds) or downsample during training.
-3. Train/evaluate per-pattern models (`scripts/train_rf.py` or notebooks), using class weights or sampling to address imbalance.
-4. Keep diagnostics on during future H&S tuning; only adjust YAML thresholds, not hard-coded values, so changes stay traceable.
 
 ## CV feature expansion (Hough + handcrafted)
 To keep the project “classical CV” while adding useful image cues, we expanded the Hough-based extractor:
@@ -654,3 +649,38 @@ For controlled tuning without leakage, use the helper grid approach (see `script
 - Val metrics: ROC-AUC 0.725, PR-AUC 0.772, F1 0.767.
 - Test metrics: ROC-AUC 0.820, PR-AUC 0.843, F1 0.807 @ threshold 0.30.
 - Artifacts: `reports/baselines/db/model.joblib`, `reports/baselines/db/train_manifest.json`, test metrics `reports/baselines/db/metrics_20251125T121303Z.json`.
+
+### Ascending Triangle RF baseline (locked)
+- Grid sweep showed a tight band of configs; we picked a mid-depth, moderate leaf setting.
+- Params: `min_samples_leaf=5`, `max_depth=12`, `n_estimators=600`, `class_weight=balanced`, `drop_structural=True`. Best threshold ≈ 0.35.
+- Val metrics: ROC-AUC 0.787, PR-AUC 0.634, F1 0.634.
+- Test metrics: ROC-AUC 0.831, PR-AUC 0.738, F1 0.634 @ threshold 0.35.
+- Artifacts: `reports/baselines/tri/model.joblib`, `reports/baselines/tri/train_manifest.json`, test metrics `reports/baselines/tri/metrics_20251126T084242Z.json`.
+
+## How to load/infer
+To score new charts with the deterministic features and the baseline models:
+1. **Render & standardize** the target windows:
+   - Render via `scripts/make_images.py` (either full walk-forward or a `--windows_csv` with `--windows_filter_col`/`--windows_split_col`).
+   - Standardize with `src/standardize/standardize_images.py --inp data/images/rendered --out data/images/standardized`.
+2. **Write a manifest** pointing at the rendered root (`scripts/write_render_manifest.py --out_root data/images/rendered ...`) and rebuild features:
+   ```bash
+   uv run python scripts/build_features.py \
+     --pipeline_cfg configs/pipeline.yaml \
+     --manifest reports/runs/<run_id>/render_manifest.json \
+     --ohlcv_root data/ohlcv \
+     --images_root data/images/standardized \
+     --out_dir data/features_infer
+   ```
+3. **Load a baseline model** and run inference:
+   - Models live under `reports/baselines/<pattern>/model.joblib` with `train_manifest.json` for metadata.
+   - Use the corresponding `y_*` target and the best threshold from the manifest (`best_threshold` field). Example (H&S):
+     ```bash
+     uv run python scripts/eval_rf.py \
+       --test_csv data/features_infer/all_features.csv \
+       --model_path reports/baselines/hs/model.joblib \
+       --target y_head_and_shoulders \
+       --threshold 0.60 \
+       --out_dir reports/eval/hs_infer
+     ```
+   - The script writes `metrics_*.json`/confusion matrices; you can also load `model.joblib` in a notebook, drop non-feature/other label columns, and call `predict_proba` to get per-row probabilities.
+4. **Important:** Training dropped structural features by default; stick to the same feature set at inference (use the numeric columns produced by `build_features.py` as-is).

@@ -1,0 +1,205 @@
+{
+  "created_utc": "2025-11-26T08:27:05.274209",
+  "train_csv": "data\\features\\train_features.csv",
+  "val_csv": "data\\features\\val_features.csv",
+  "target": "y_ascending_triangle",
+  "params": {
+    "n_estimators": 1000,
+    "max_depth": 12,
+    "min_samples_leaf": 8,
+    "class_weight": "balanced",
+    "n_jobs": -1,
+    "random_state": 42
+  },
+  "meta": {
+    "train_rows": 1012,
+    "val_rows": 284,
+    "features_used": 52,
+    "drop_structural": true,
+    "target_positive_count": 274,
+    "target_negative_count": 738
+  },
+  "scores": {
+    "roc_auc": 0.7858206075307349,
+    "pr_auc": 0.6380865492393407,
+    "f1_at_best_th": 0.629757785467128,
+    "best_threshold": 0.25
+  },
+  "best_threshold": 0.25,
+  "feature_names": [
+    "bars",
+    "ret_mean",
+    "ret_std",
+    "abs_ret_mean",
+    "atr_mean",
+    "atr_std",
+    "roc_5",
+    "roc_10",
+    "roc_20",
+    "rel_close_ma10",
+    "rel_close_ma20",
+    "rel_close_ma50",
+    "body_pct_mean",
+    "body_pct_std",
+    "up_wick_pct_mean",
+    "dn_wick_pct_mean",
+    "bull_frac",
+    "bear_frac",
+    "n_piv_hi",
+    "n_piv_lo",
+    "piv_hi_spacing_mean",
+    "piv_lo_spacing_mean",
+    "piv_hi_val_std",
+    "piv_lo_val_std",
+    "seg_slope",
+    "cv_has_lines",
+    "cv_num_lines",
+    "cv_theta_mean",
+    "cv_theta_std",
+    "cv_accumulator_max",
+    "cv_frac_horizontal",
+    "cv_frac_upward",
+    "cv_frac_downward",
+    "cv_edge_density",
+    "cv_edge_entropy",
+    "cv_line_angle_diff_mean",
+    "cv_hog_mean",
+    "cv_hog_std",
+    "cv_hog_max",
+    "cv_contour_count",
+    "cv_contour_area_mean",
+    "cv_contour_area_max",
+    "cv_hs_template_corr",
+    "cv_grad_bin_0",
+    "cv_grad_bin_1",
+    "cv_grad_bin_2",
+    "cv_grad_bin_3",
+    "cv_grad_bin_4",
+    "cv_grad_bin_5",
+    "cv_grad_bin_6",
+    "cv_grad_bin_7",
+    "cv_grad_bin_8"
+  ],
+  "feature_importance_top": [
+    {
+      "feature": "bear_frac",
+      "perm_importance": 0.004225352112676051
+    },
+    {
+      "feature": "n_piv_lo",
+      "perm_importance": 0.0028169014084507005
+    },
+    {
+      "feature": "bull_frac",
+      "perm_importance": 0.0017605633802816767
+    },
+    {
+      "feature": "rel_close_ma20",
+      "perm_importance": 0.0007042253521126529
+    },
+    {
+      "feature": "cv_line_angle_diff_mean",
+      "perm_importance": 0.0007042253521126307
+    },
+    {
+      "feature": "bars",
+      "perm_importance": 0.0
+    },
+    {
+      "feature": "cv_has_lines",
+      "perm_importance": 0.0
+    },
+    {
+      "feature": "cv_hog_mean",
+      "perm_importance": 0.0
+    },
+    {
+      "feature": "cv_hog_std",
+      "perm_importance": 0.0
+    },
+    {
+      "feature": "cv_hog_max",
+      "perm_importance": 0.0
+    },
+    {
+      "feature": "body_pct_std",
+      "perm_importance": -4.4408920985006264e-17
+    },
+    {
+      "feature": "roc_5",
+      "perm_importance": -0.00035211267605637084
+    },
+    {
+      "feature": "cv_frac_upward",
+      "perm_importance": -0.00035211267605637084
+    },
+    {
+      "feature": "cv_grad_bin_1",
+      "perm_importance": -0.00035211267605637084
+    },
+    {
+      "feature": "cv_contour_area_mean",
+      "perm_importance": -0.00035211267605638196
+    },
+    {
+      "feature": "cv_theta_mean",
+      "perm_importance": -0.0003521126760564042
+    },
+    {
+      "feature": "roc_10",
+      "perm_importance": -0.0010563380281690571
+    },
+    {
+      "feature": "cv_theta_std",
+      "perm_importance": -0.0010563380281690682
+    },
+    {
+      "feature": "rel_close_ma50",
+      "perm_importance": -0.0014084507042253836
+    },
+    {
+      "feature": "cv_contour_area_max",
+      "perm_importance": -0.0014084507042254057
+    },
+    {
+      "feature": "piv_lo_val_std",
+      "perm_importance": -0.0021126760563380696
+    },
+    {
+      "feature": "cv_grad_bin_3",
+      "perm_importance": -0.0021126760563380696
+    },
+    {
+      "feature": "up_wick_pct_mean",
+      "perm_importance": -0.002112676056338081
+    },
+    {
+      "feature": "cv_frac_downward",
+      "perm_importance": -0.002112676056338081
+    },
+    {
+      "feature": "cv_grad_bin_2",
+      "perm_importance": -0.002112676056338081
+    },
+    {
+      "feature": "cv_grad_bin_7",
+      "perm_importance": -0.002112676056338081
+    },
+    {
+      "feature": "cv_edge_density",
+      "perm_importance": -0.002464788732394407
+    },
+    {
+      "feature": "body_pct_mean",
+      "perm_importance": -0.0024647887323944297
+    },
+    {
+      "feature": "dn_wick_pct_mean",
+      "perm_importance": -0.0024647887323944405
+    },
+    {
+      "feature": "rel_close_ma10",
+      "perm_importance": -0.0028169014084507673
+    }
+  ]
+}
