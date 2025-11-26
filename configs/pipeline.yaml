@@ -130,6 +130,14 @@ cv_features:
     grad_bins: 9
     hog_win: 64
     template_width: 64
+  bovw:
+    enabled: true
+    vocab_path: "reports/cv_vocab/bovw_k64_seed42.joblib"
+    n_clusters: 64
+    max_keypoints: 500
+    sample_images_for_vocab: 2000
+    max_descriptors_total: 200000
+    random_state: 42
 
 dataset:
   manifest_path: "reports/runs/latest/render_manifest.json"

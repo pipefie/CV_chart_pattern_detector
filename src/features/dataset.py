@@ -14,6 +14,7 @@ from src.labeling import PatternLabeler
 from src.labeling.swing_points import compute_atr as labeling_atr
 
 from .cv_hough import extract_cv_features
+from .cv_local import extract_orb_descriptors, bovw_histogram
 
 LOG = logging.getLogger(__name__)
 
@@ -316,9 +317,26 @@ class DatasetBuilder:
         self.manifest_path = manifest_path
         self.labels_csv = labels_csv
         self.pattern_labeler = PatternLabeler(pipeline_cfg.get("labeling", {}))
-        self.cv_cfg = (pipeline_cfg.get("cv_features") or {}).get("hough", {})
+        cv_features_cfg = pipeline_cfg.get("cv_features") or {}
+        self.cv_cfg = cv_features_cfg.get("hough", {})
+        self.bovw_cfg = cv_features_cfg.get("bovw", {}) or {}
         self.feature_cfg = pipeline_cfg.get("features", {})
         self._ohlcv_cache: Dict[str, pd.DataFrame] = {}
+        self._bovw_vocab = None
+        self._bovw_clusters: int | None = None
+        if self.bovw_cfg.get("enabled"):
+            vocab_path = self.bovw_cfg.get("vocab_path")
+            if not vocab_path:
+                raise ValueError("cv_features.bovw.enabled is true but vocab_path is missing.")
+            vocab_path = Path(vocab_path)
+            if not vocab_path.exists():
+                raise FileNotFoundError(f"BoVW vocab model not found at {vocab_path}")
+            try:
+                from joblib import load as joblib_load
+            except Exception as exc:  # pragma: no cover - dependency guard
+                raise ImportError("joblib is required to load BoVW vocabulary") from exc
+            self._bovw_vocab = joblib_load(vocab_path)
+            self._bovw_clusters = int(self._bovw_vocab.n_clusters)
 
     def _iter_samples(self) -> Iterator[Sample]:
         if self.manifest_path:
@@ -345,6 +363,11 @@ class DatasetBuilder:
             feats.update(features_pattern_proxies(win))
         if self.cv_cfg:
             feats.update(extract_cv_features(png_path, self.cv_cfg))
+        if self.bovw_cfg.get("enabled") and self._bovw_vocab is not None:
+            desc = extract_orb_descriptors(png_path, self.bovw_cfg)
+            hist = bovw_histogram(desc, self._bovw_vocab, self._bovw_clusters or 0, norm="l2")
+            for i, v in enumerate(hist):
+                feats[f"cv_bovw_{i}"] = float(v)
         return feats
 
     def build(self) -> pd.DataFrame:

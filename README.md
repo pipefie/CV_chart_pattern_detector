@@ -605,6 +605,26 @@ To keep the project “classical CV” while adding useful image cues, we expand
 
 All of these live in `src/features/cv_hough.py` via `extract_cv_features` (aliased to `extract_hough_features` for compatibility). The pipeline reads CV params from `configs/pipeline.yaml -> cv_features.hough` (e.g., Canny thresholds, Hough rho/theta/threshold, HOG window, grad bins, template width) and merges these into the feature CSVs. You just need `cv2` installed; no deep models are used. After updating, rerun `build_features.py` to populate the new `cv_*` columns.***
 
+## ORB + Bag of Visual Words (BoVW)
+To capture local visual structure beyond global lines/TA, we added ORB + BoVW as an optional CV block (disabled by default):
+- **What:** ORB keypoints/descriptors on standardized charts; a BoVW histogram (length K) summarizing where “interesting points” occur. Implemented in `src/features/cv_local.py`.
+- **Why:** Local descriptors + visual vocabularies are a classic CV technique; they let models learn from the image itself (corners/peaks/intersections) without deep nets and complement Hough/TA features.
+- **How:** Standardized chart → ORB keypoints → ORB descriptors → assign to KMeans cluster centers (vocabulary) → normalized histogram `cv_bovw_*` added to the feature vector.
+- **Config:** `configs/pipeline.yaml -> cv_features.bovw` (enabled flag, vocab_path, n_clusters, max_keypoints, sampling limits, seed). If `enabled=false`, nothing changes.
+- **Build vocab:** Use `scripts/build_bovw_vocab.py` to fit a MiniBatchKMeans vocabulary from standardized images (manifest or images_root). Example:
+  ```bash
+  uv run python scripts/build_bovw_vocab.py \
+    --pipeline_cfg configs/pipeline.yaml \
+    --manifest reports/runs/<run_id>/render_manifest.json \
+    --images_root data/images/standardized \
+    --out_dir reports/cv_vocab
+  ```
+  Outputs a joblib vocab (e.g., `bovw_k64_seed42.joblib`) plus a JSON manifest with counts/params.
+- **Use BoVW in features:**
+  1) Set `cv_features.bovw.enabled=true` and `vocab_path` to the saved joblib in `configs/pipeline.yaml`.
+  2) Rerun `scripts/build_features.py` to regenerate feature CSVs with `cv_bovw_*` columns.
+  3) Retrain/evaluate RFs with the new feature set; compare metrics with/without BoVW.
+
 ## Training scripts vs modules
 - `src/models/train_rf.py` / `src/models/eval_rf.py` hold the core logic (load CSVs, drop non-feature columns, fit/evaluate scikit RFs, save models/manifests/metrics).
 - `scripts/train_rf.py` / `scripts/eval_rf.py` are thin CLI wrappers that parse args (including defaults from `configs/pipeline.yaml`) and call the module functions. Use the scripts on the CLI; import the modules in notebooks.
@@ -656,6 +676,13 @@ For controlled tuning without leakage, use the helper grid approach (see `script
 - Val metrics: ROC-AUC 0.787, PR-AUC 0.634, F1 0.634.
 - Test metrics: ROC-AUC 0.831, PR-AUC 0.738, F1 0.634 @ threshold 0.35.
 - Artifacts: `reports/baselines/tri/model.joblib`, `reports/baselines/tri/train_manifest.json`, test metrics `reports/baselines/tri/metrics_20251126T084242Z.json`.
+
+### H&S RF with BoVW (comparison)
+- BoVW was enabled (ORB + KMeans vocab, n_clusters=64; features built to `data/features_bovw`). Grid sweep over RF params remained tight: best configs clustered around `min_samples_leaf=8`, `max_depth=8–16`, `n_estimators=600–800` with threshold ≈ 0.60.
+- Representative pick: `msl=8`, `md=8`, `ne=600`, `class_weight=balanced`, `drop_structural=True`, `th≈0.60`.
+  - Val metrics: ROC-AUC ~0.866, PR-AUC ~0.520.
+  - Test metrics: ROC-AUC ~0.909, PR-AUC ~0.681, F1 ~0.615 @ 0.60.
+- Compared to the non-BoVW H&S baseline, PR-AUC nudged up slightly (≈0.67→0.68) with similar F1; ROC dipped a bit. Net gain is modest. Keep both versions for future comparison if desired; choose the BoVW variant if you want to emphasize image-driven cues, or stick with the non-BoVW baseline for simplicity.
 
 ## How to load/infer
 To score new charts with the deterministic features and the baseline models:
