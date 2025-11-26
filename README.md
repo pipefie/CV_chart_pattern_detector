@@ -684,6 +684,21 @@ For controlled tuning without leakage, use the helper grid approach (see `script
   - Test metrics: ROC-AUC ~0.909, PR-AUC ~0.681, F1 ~0.615 @ 0.60.
 - Compared to the non-BoVW H&S baseline, PR-AUC nudged up slightly (≈0.67→0.68) with similar F1; ROC dipped a bit. Net gain is modest. Keep both versions for future comparison if desired; choose the BoVW variant if you want to emphasize image-driven cues, or stick with the non-BoVW baseline for simplicity.
 
+### Double Top RF with BoVW (comparison)
+- BoVW enabled; features at `data/features_bovw`. Grid sweep remained very consistent: best configs around `msl=5–8`, `md=8–16`, `ne=600–800`, threshold ≈ 0.35.
+- Representative pick: `min_samples_leaf=5`, `max_depth=16`, `n_estimators=600–800`, `drop_structural=True`, `th≈0.35`.
+  - Test metrics: PR-AUC ≈ 0.898, ROC-AUC ≈ 0.849, F1 ≈ 0.83 @ 0.35.
+- Compared to the non-BoVW DT baseline (PR-AUC 0.889, ROC-AUC 0.841, F1 0.822 @ 0.30), BoVW gives a small PR/ROC lift with similar or slightly higher F1. Favor the BoVW DT if you want the tiny gain; otherwise the baseline is already strong.
+
+### Double Bottom RF with BoVW (comparison)
+- BoVW enabled; grid sweep shows top configs clustered with test PR-AUC ≈ 0.853–0.854, ROC-AUC ≈ 0.833–0.835, F1 ≈ 0.81 at th ~0.35–0.40.
+- Representative pick: `min_samples_leaf=8`, `max_depth=8`, `n_estimators=800` (or `msl=5`, `md=16`, `ne=600/800`), `drop_structural=True`, `th≈0.35`.
+  - Test metrics: PR-AUC ≈ 0.854, ROC-AUC ≈ 0.834, F1 ≈ 0.81.
+- Non-BoVW DB baseline was PR-AUC 0.843, ROC-AUC 0.820, F1 0.807 @ 0.30. BoVW yields a modest gain; you can keep a BoVW DB variant for comparison.
+
+### Ascending Triangle with BoVW (comparison)
+- BoVW hurt triangles in initial runs: val/test metrics dropped versus the baseline (test PR-AUC ~0.61 vs 0.738, ROC ~0.80 vs 0.831, F1 ~0.62 vs 0.63). Pending a grid sweep, the non-BoVW triangle baseline remains preferred.
+
 ## How to load/infer
 To score new charts with the deterministic features and the baseline models:
 1. **Render & standardize** the target windows:
