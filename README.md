@@ -705,6 +705,24 @@ For controlled tuning without leakage, use the helper grid approach (see `script
 - Double Bottom: BoVW gives a modest lift (test PR-AUC ≈ 0.853–0.854, ROC ≈ 0.833–0.835, F1 ≈ 0.81) with configs like `msl=8, md=8, ne=800` or `msl=5, md=16, ne=600/800`. Also a small gain vs baseline.
 - Ascending Triangle: BoVW consistently degrades performance; even the best BoVW grid configs (test PR-AUC ~0.666–0.669, ROC ~0.81, F1 ~0.63) lag the non-BoVW baseline. Stick with the baseline (no BoVW) for triangles.
 
+### Baseline model summary (per pattern)
+Metrics to interpret:
+- **ROC-AUC:** probability a random positive scores above a random negative (1.0 = perfect, 0.5 = random).
+- **PR-AUC:** precision-recall area; better reflects rare positives.
+- **F1@threshold:** harmonic mean of precision/recall at the chosen decision threshold (higher threshold → more precision, lower → more recall).
+
+Locked (non-BoVW) baselines:
+- H&S: `msl=3, md=16, ne=800`, `class_weight=balanced`, `drop_structural=True`, `th≈0.60`. Test ROC-AUC 0.916, PR-AUC 0.670, F1 0.615 (`reports/baselines/hs/*`).
+- Double Top: `msl=3, md=8, ne=600`, `class_weight=balanced`, `drop_structural=True`, `th≈0.30`. Test ROC-AUC 0.841, PR-AUC 0.889, F1 0.822 (`reports/baselines/dt/*`).
+- Double Bottom: `msl=8, md=12, ne=600`, `class_weight=balanced`, `drop_structural=True`, `th≈0.30`. Test ROC-AUC 0.820, PR-AUC 0.843, F1 0.807 (`reports/baselines/db/*`).
+- Ascending Triangle: `msl=5, md=12, ne=600`, `class_weight=balanced`, `drop_structural=True`, `th≈0.35`. Test ROC-AUC 0.831, PR-AUC 0.738, F1 0.634 (`reports/baselines/tri/*`).
+
+BoVW variants (not locked, for comparison):
+- H&S: small PR lift (test PR-AUC ~0.68, ROC ~0.91, F1 ~0.615 @ th≈0.60) with configs around `msl=8, md=8–16, ne=600–800`.
+- Double Top: modest gain (test PR-AUC ~0.898, ROC ~0.845–0.849, F1 ~0.81–0.83 @ th≈0.35) with `msl=5–8, md=8–16, ne=600–800`.
+- Double Bottom: slight lift (test PR-AUC ~0.854, ROC ~0.833–0.835, F1 ~0.81 @ th≈0.35–0.40) with `msl=8, md=8, ne=800` or `msl=5, md=16, ne=600/800`.
+- Ascending Triangle: BoVW underperforms baseline (test PR-AUC ~0.666–0.669); keep non-BoVW for this pattern.
+
 ## How to load/infer
 To score new charts with the deterministic features and the baseline models:
 1. **Render & standardize** the target windows:
