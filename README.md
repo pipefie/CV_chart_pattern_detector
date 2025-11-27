@@ -699,6 +699,12 @@ For controlled tuning without leakage, use the helper grid approach (see `script
 ### Ascending Triangle with BoVW (comparison)
 - BoVW hurt triangles in initial runs: val/test metrics dropped versus the baseline (test PR-AUC ~0.61 vs 0.738, ROC ~0.80 vs 0.831, F1 ~0.62 vs 0.63). Pending a grid sweep, the non-BoVW triangle baseline remains preferred.
 
+### BoVW summaries across patterns
+- H&S: BoVW adds a small PR-AUC bump with similar F1; ROC dips slightly. Best configs cluster around `msl=8`, `md=8–16`, `ne=600–800`, `th≈0.60`. Keep both versions if you want to emphasize image cues; gain is modest.
+- Double Top: BoVW yields a slight improvement over baseline (test PR-AUC ≈ 0.898, ROC ≈ 0.845–0.849, F1 ≈ 0.81–0.83 @ 0.35) with `msl=5–8`, `md=8–16`, `ne=600–800`. Positive but small.
+- Double Bottom: BoVW gives a modest lift (test PR-AUC ≈ 0.853–0.854, ROC ≈ 0.833–0.835, F1 ≈ 0.81) with configs like `msl=8, md=8, ne=800` or `msl=5, md=16, ne=600/800`. Also a small gain vs baseline.
+- Ascending Triangle: BoVW consistently degrades performance; even the best BoVW grid configs (test PR-AUC ~0.666–0.669, ROC ~0.81, F1 ~0.63) lag the non-BoVW baseline. Stick with the baseline (no BoVW) for triangles.
+
 ## How to load/infer
 To score new charts with the deterministic features and the baseline models:
 1. **Render & standardize** the target windows:
