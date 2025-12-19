@@ -1,0 +1,64 @@
+{
+  "run_id": "20251121-0814_seed42",
+  "created_utc": "2025-11-21T08:14:49Z",
+  "git_commit": "b6c912de02a79829958ebfb4a4b4942d0597ad55",
+  "env": {
+    "python": "3.13.9",
+    "pandas": "2.3.3",
+    "matplotlib": "3.10.7",
+    "mplfinance": "0.12.10b0",
+    "Pillow": "12.0.0",
+    "pyyaml": "6.0.3",
+    "ccxt": "4.5.14"
+  },
+  "configs": {
+    "backtest_yaml_path": "configs\\backtest.yaml",
+    "render_yaml_path": "configs\\render.yaml",
+    "patterns_yaml_path": "configs\\patterns.yaml",
+    "hashes": {
+      "backtest.yaml": "sha256:80dabd70866db7eabf4988cd59e7185225c0d3cca7e32506ed7808734d6946c4",
+      "render.yaml": "sha256:20783243423c3dbbe166e248def82499da410ae66758de4f04a952bf16a15ee3",
+      "patterns.yaml": "sha256:5152b0e01103a70e58e77a4d3d8f6daff1f0db533ea64afcfd1d2fa00c902eb4"
+    }
+  },
+  "render_params": {
+    "window_bars": 160,
+    "stride_bars": 40,
+    "seed": 42
+  },
+  "universes": {
+    "crypto": {
+      "symbols": [
+        "BTC-USD",
+        "ETH-USD"
+      ],
+      "timeframe": "1h",
+      "session": {
+        "use_regular_hours_only": false,
+        "timezone": "UTC"
+      }
+    },
+    "equities_etf": {
+      "symbols": [
+        "AAPL",
+        "NVDA",
+        "GOOGL",
+        "TSLA",
+        "AMZN",
+        "QQQ",
+        "SPY"
+      ],
+      "timeframe": "1h",
+      "session": {
+        "use_regular_hours_only": true,
+        "timezone": "America/New_York"
+      }
+    }
+  },
+  "outputs": {
+    "train_count": 1012,
+    "val_count": 276,
+    "test_count": 162,
+    "out_root": "data\\images\\rendered"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "roc_auc": 1.0,
+  "pr_auc": 1.0,
+  "f1_at_th": 1.0,
+  "threshold": 0.05,
+  "class_0": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "support": 152
+  },
+  "class_1": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "support": 18
+  }
+}

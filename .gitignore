@@ -2,5 +2,6 @@
 *venv
 *__pycache__
 *.png
-*.json
+
 *.zip
+dvc-storage-*.json

@@ -1,0 +1,11 @@
+{
+  "n_clusters": 64,
+  "max_keypoints": 500,
+  "sample_images_requested": 2000,
+  "sample_images_used": 400,
+  "descriptors_used": 200000,
+  "random_state": 42,
+  "vocab_path": "reports\\cv_vocab\\bovw_k64_seed42.joblib",
+  "source_manifest": "reports\\runs\\20251124-0945_seed42\\render_manifest.json",
+  "images_root": "data\\images\\standardized"
+}

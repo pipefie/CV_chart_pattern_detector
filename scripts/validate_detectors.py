@@ -278,6 +278,11 @@ def main():
         summary[f"{name}_detection_ratio"] = ratio
         summary[f"{name}_only_ours"] = our_hits - both
         summary[f"{name}_only_ta"] = ta_hits - both
+        if f"p_{name}" in df.columns:
+            abstain = int((df[f"p_{name}"].between(0.1,0.9)).sum())
+            summary[f"{name}_abstain_rows"] = abstain
+            summary[f"{name}_p_mean"] = float(df[f"p_{name}"].mean())
+            summary[f"{name}_p_std"] = float(df[f"p_{name}"].std())
 
     by_symbol = {}
     for sym, g in df.groupby("symbol"):
@@ -298,6 +303,10 @@ def main():
             entry[f"{name}_only_ours"] = int((g[our_col] > 0).sum()) if our_col in g.columns else 0
             if ta_col in g.columns:
                 entry[f"{name}_only_ta"] = int((g[ta_col] > 0).sum() - ((g[our_col] > 0) & (g[ta_col] > 0)).sum()) if our_col in g.columns else int((g[ta_col] > 0).sum())
+            if f"p_{name}" in g.columns:
+                entry[f"{name}_abstain_rows"] = int((g[f"p_{name}"].between(0.1,0.9)).sum())
+                entry[f"{name}_p_mean"] = float(g[f"p_{name}"].mean())
+                entry[f"{name}_p_std"] = float(g[f"p_{name}"].std())
         by_symbol[sym] = entry
     summary["per_symbol"] = by_symbol
 

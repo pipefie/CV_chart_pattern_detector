@@ -1,0 +1,920 @@
+[
+  {
+    "params": {
+      "min_samples_leaf": 3,
+      "max_depth": 8,
+      "n_estimators": 600,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.723453134572187,
+      "pr_auc": 0.767020170329815,
+      "f1_at_best_th": 0.7632850241545893,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8191609977324263,
+      "pr_auc": 0.8407750612486768,
+      "f1_at_th": 0.8016877637130801,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.9032258064516129,
+        "recall": 0.3888888888888889,
+        "f1": 0.5436893203883495,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6834532374100719,
+        "recall": 0.9693877551020408,
+        "f1": 0.8016877637130801,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl3_md8_ne600\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 3,
+      "max_depth": 8,
+      "n_estimators": 800,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7229426179293446,
+      "pr_auc": 0.7644543815643499,
+      "f1_at_best_th": 0.7681159420289855,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8191609977324263,
+      "pr_auc": 0.83879596784735,
+      "f1_at_th": 0.7949790794979079,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.896551724137931,
+        "recall": 0.3611111111111111,
+        "f1": 0.5148514851485149,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6737588652482269,
+        "recall": 0.9693877551020408,
+        "f1": 0.7949790794979079,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl3_md8_ne800\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 3,
+      "max_depth": 8,
+      "n_estimators": 1000,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7226873596079232,
+      "pr_auc": 0.7656131983929338,
+      "f1_at_best_th": 0.7681159420289855,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8178854875283446,
+      "pr_auc": 0.83903925595746,
+      "f1_at_th": 0.7983193277310925,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.9,
+        "recall": 0.375,
+        "f1": 0.5294117647058824,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6785714285714286,
+        "recall": 0.9693877551020408,
+        "f1": 0.7983193277310925,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl3_md8_ne1000\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 3,
+      "max_depth": 12,
+      "n_estimators": 600,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7284051460077599,
+      "pr_auc": 0.7682997208177264,
+      "f1_at_best_th": 0.7662650602409639,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8154761904761904,
+      "pr_auc": 0.8385730944342964,
+      "f1_at_th": 0.7866108786610879,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.8620689655172413,
+        "recall": 0.3472222222222222,
+        "f1": 0.49504950495049505,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6666666666666666,
+        "recall": 0.9591836734693877,
+        "f1": 0.7866108786610879,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl3_md12_ne600\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 3,
+      "max_depth": 12,
+      "n_estimators": 800,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7275883193792118,
+      "pr_auc": 0.7694012596402205,
+      "f1_at_best_th": 0.7644230769230769,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8159013605442177,
+      "pr_auc": 0.8378145056871413,
+      "f1_at_th": 0.7966804979253111,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.9259259259259259,
+        "recall": 0.3472222222222222,
+        "f1": 0.5050505050505051,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6713286713286714,
+        "recall": 0.9795918367346939,
+        "f1": 0.7966804979253111,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl3_md12_ne800\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 3,
+      "max_depth": 12,
+      "n_estimators": 1000,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7272820093935062,
+      "pr_auc": 0.769730481325782,
+      "f1_at_best_th": 0.7651715039577837,
+      "best_threshold": 0.39999999999999997
+    },
+    "test_scores": {
+      "roc_auc": 0.8168934240362812,
+      "pr_auc": 0.8390538799824083,
+      "f1_at_th": 0.8018433179723502,
+      "threshold": 0.39999999999999997,
+      "class_0": {
+        "precision": 0.7843137254901961,
+        "recall": 0.5555555555555556,
+        "f1": 0.6504065040650406,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.7310924369747899,
+        "recall": 0.8877551020408163,
+        "f1": 0.8018433179723502,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl3_md12_ne1000\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 3,
+      "max_depth": 16,
+      "n_estimators": 600,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7237594445578927,
+      "pr_auc": 0.7623816781939322,
+      "f1_at_best_th": 0.7607655502392344,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8178854875283448,
+      "pr_auc": 0.8396470005508427,
+      "f1_at_th": 0.7916666666666666,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.8928571428571429,
+        "recall": 0.3472222222222222,
+        "f1": 0.5,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6690140845070423,
+        "recall": 0.9693877551020408,
+        "f1": 0.7916666666666666,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl3_md16_ne600\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 3,
+      "max_depth": 16,
+      "n_estimators": 800,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7248825811721462,
+      "pr_auc": 0.7649218288509528,
+      "f1_at_best_th": 0.7607655502392344,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8167517006802721,
+      "pr_auc": 0.8395794188619856,
+      "f1_at_th": 0.7966804979253111,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.9259259259259259,
+        "recall": 0.3472222222222222,
+        "f1": 0.5050505050505051,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6713286713286714,
+        "recall": 0.9795918367346939,
+        "f1": 0.7966804979253111,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl3_md16_ne800\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 3,
+      "max_depth": 16,
+      "n_estimators": 1000,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7233510312436185,
+      "pr_auc": 0.7656660462294762,
+      "f1_at_best_th": 0.7607655502392344,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8159013605442177,
+      "pr_auc": 0.8376576466400134,
+      "f1_at_th": 0.7916666666666666,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.8928571428571429,
+        "recall": 0.3472222222222222,
+        "f1": 0.5,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6690140845070423,
+        "recall": 0.9693877551020408,
+        "f1": 0.7916666666666666,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl3_md16_ne1000\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 5,
+      "max_depth": 8,
+      "n_estimators": 600,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7257504594649785,
+      "pr_auc": 0.7706307519829118,
+      "f1_at_best_th": 0.7632850241545893,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8176020408163265,
+      "pr_auc": 0.8391383430255435,
+      "f1_at_th": 0.8067226890756303,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.9333333333333333,
+        "recall": 0.3888888888888889,
+        "f1": 0.5490196078431373,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6857142857142857,
+        "recall": 0.9795918367346939,
+        "f1": 0.8067226890756303,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl5_md8_ne600\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 5,
+      "max_depth": 8,
+      "n_estimators": 800,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7259546661221157,
+      "pr_auc": 0.771274538754013,
+      "f1_at_best_th": 0.7614457831325301,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.816609977324263,
+      "pr_auc": 0.8394760593816127,
+      "f1_at_th": 0.8067226890756303,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.9333333333333333,
+        "recall": 0.3888888888888889,
+        "f1": 0.5490196078431373,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6857142857142857,
+        "recall": 0.9795918367346939,
+        "f1": 0.8067226890756303,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl5_md8_ne800\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 5,
+      "max_depth": 8,
+      "n_estimators": 1000,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7239636512150297,
+      "pr_auc": 0.7697502704810602,
+      "f1_at_best_th": 0.7614457831325301,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8185941043083901,
+      "pr_auc": 0.842366253195866,
+      "f1_at_th": 0.8067226890756303,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.9333333333333333,
+        "recall": 0.3888888888888889,
+        "f1": 0.5490196078431373,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6857142857142857,
+        "recall": 0.9795918367346939,
+        "f1": 0.8067226890756303,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl5_md8_ne1000\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 5,
+      "max_depth": 12,
+      "n_estimators": 600,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7219726363079436,
+      "pr_auc": 0.7638233387734876,
+      "f1_at_best_th": 0.7584541062801933,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8168934240362811,
+      "pr_auc": 0.8401601040319087,
+      "f1_at_th": 0.7949790794979079,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.896551724137931,
+        "recall": 0.3611111111111111,
+        "f1": 0.5148514851485149,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6737588652482269,
+        "recall": 0.9693877551020408,
+        "f1": 0.7949790794979079,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl5_md12_ne600\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 5,
+      "max_depth": 12,
+      "n_estimators": 800,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7223810496222176,
+      "pr_auc": 0.7633233732820114,
+      "f1_at_best_th": 0.7681159420289855,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8176020408163265,
+      "pr_auc": 0.8402572825109917,
+      "f1_at_th": 0.7949790794979079,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.896551724137931,
+        "recall": 0.3611111111111111,
+        "f1": 0.5148514851485149,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6737588652482269,
+        "recall": 0.9693877551020408,
+        "f1": 0.7949790794979079,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl5_md12_ne800\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 5,
+      "max_depth": 12,
+      "n_estimators": 1000,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7227384112722075,
+      "pr_auc": 0.7640140383021996,
+      "f1_at_best_th": 0.7632850241545893,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8168934240362812,
+      "pr_auc": 0.8396596662135153,
+      "f1_at_th": 0.7949790794979079,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.896551724137931,
+        "recall": 0.3611111111111111,
+        "f1": 0.5148514851485149,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6737588652482269,
+        "recall": 0.9693877551020408,
+        "f1": 0.7949790794979079,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl5_md12_ne1000\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 5,
+      "max_depth": 16,
+      "n_estimators": 600,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7225342046150706,
+      "pr_auc": 0.7658391583871209,
+      "f1_at_best_th": 0.7584541062801933,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8160430839002267,
+      "pr_auc": 0.8401141859042769,
+      "f1_at_th": 0.7983193277310925,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.9,
+        "recall": 0.375,
+        "f1": 0.5294117647058824,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6785714285714286,
+        "recall": 0.9693877551020408,
+        "f1": 0.7983193277310925,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl5_md16_ne600\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 5,
+      "max_depth": 16,
+      "n_estimators": 800,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7233510312436185,
+      "pr_auc": 0.7651120278917315,
+      "f1_at_best_th": 0.7699757869249395,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8146258503401359,
+      "pr_auc": 0.8384924016162576,
+      "f1_at_th": 0.7949790794979079,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.896551724137931,
+        "recall": 0.3611111111111111,
+        "f1": 0.5148514851485149,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6737588652482269,
+        "recall": 0.9693877551020408,
+        "f1": 0.7949790794979079,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl5_md16_ne800\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 5,
+      "max_depth": 16,
+      "n_estimators": 1000,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7237594445578927,
+      "pr_auc": 0.7658654294266813,
+      "f1_at_best_th": 0.7632850241545893,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8151927437641723,
+      "pr_auc": 0.8391229502398774,
+      "f1_at_th": 0.7949790794979079,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.896551724137931,
+        "recall": 0.3611111111111111,
+        "f1": 0.5148514851485149,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6737588652482269,
+        "recall": 0.9693877551020408,
+        "f1": 0.7949790794979079,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl5_md16_ne1000\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 8,
+      "max_depth": 8,
+      "n_estimators": 600,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7276904227077803,
+      "pr_auc": 0.7759625631126565,
+      "f1_at_best_th": 0.7681159420289855,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8197278911564625,
+      "pr_auc": 0.8433081084295426,
+      "f1_at_th": 0.803347280334728,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.9310344827586207,
+        "recall": 0.375,
+        "f1": 0.5346534653465347,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6808510638297872,
+        "recall": 0.9795918367346939,
+        "f1": 0.803347280334728,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl8_md8_ne600\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 8,
+      "max_depth": 8,
+      "n_estimators": 800,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.727230957729222,
+      "pr_auc": 0.7741142302352403,
+      "f1_at_best_th": 0.7662650602409639,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8180272108843538,
+      "pr_auc": 0.8407101240851114,
+      "f1_at_th": 0.803347280334728,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.9310344827586207,
+        "recall": 0.375,
+        "f1": 0.5346534653465347,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6808510638297872,
+        "recall": 0.9795918367346939,
+        "f1": 0.803347280334728,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl8_md8_ne800\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 8,
+      "max_depth": 8,
+      "n_estimators": 1000,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7262099244435368,
+      "pr_auc": 0.7731953894356743,
+      "f1_at_best_th": 0.7681159420289855,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8177437641723355,
+      "pr_auc": 0.8409431214386482,
+      "f1_at_th": 0.803347280334728,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.9310344827586207,
+        "recall": 0.375,
+        "f1": 0.5346534653465347,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6808510638297872,
+        "recall": 0.9795918367346939,
+        "f1": 0.803347280334728,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl8_md8_ne1000\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 8,
+      "max_depth": 12,
+      "n_estimators": 600,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7249336328364304,
+      "pr_auc": 0.7721318345195424,
+      "f1_at_best_th": 0.7669902912621359,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8200113378684808,
+      "pr_auc": 0.8432076435769409,
+      "f1_at_th": 0.8067226890756303,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.9333333333333333,
+        "recall": 0.3888888888888889,
+        "f1": 0.5490196078431373,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6857142857142857,
+        "recall": 0.9795918367346939,
+        "f1": 0.8067226890756303,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl8_md12_ne600\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 8,
+      "max_depth": 12,
+      "n_estimators": 800,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7250357361649988,
+      "pr_auc": 0.771447007220116,
+      "f1_at_best_th": 0.7699757869249395,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8147675736961452,
+      "pr_auc": 0.8393438731971916,
+      "f1_at_th": 0.803347280334728,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.9310344827586207,
+        "recall": 0.375,
+        "f1": 0.5346534653465347,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6808510638297872,
+        "recall": 0.9795918367346939,
+        "f1": 0.803347280334728,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl8_md12_ne800\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 8,
+      "max_depth": 12,
+      "n_estimators": 1000,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7241678578721666,
+      "pr_auc": 0.7715038022935203,
+      "f1_at_best_th": 0.7681159420289855,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8170351473922902,
+      "pr_auc": 0.8405293902931457,
+      "f1_at_th": 0.803347280334728,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.9310344827586207,
+        "recall": 0.375,
+        "f1": 0.5346534653465347,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6808510638297872,
+        "recall": 0.9795918367346939,
+        "f1": 0.803347280334728,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl8_md12_ne1000\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 8,
+      "max_depth": 16,
+      "n_estimators": 600,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7248825811721462,
+      "pr_auc": 0.7728649728462177,
+      "f1_at_best_th": 0.7669902912621359,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8178854875283446,
+      "pr_auc": 0.8409946256514071,
+      "f1_at_th": 0.8067226890756303,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.9333333333333333,
+        "recall": 0.3888888888888889,
+        "f1": 0.5490196078431373,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6857142857142857,
+        "recall": 0.9795918367346939,
+        "f1": 0.8067226890756303,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl8_md16_ne600\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 8,
+      "max_depth": 16,
+      "n_estimators": 800,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7250357361649991,
+      "pr_auc": 0.7721084022971376,
+      "f1_at_best_th": 0.7669902912621359,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.814767573696145,
+      "pr_auc": 0.8384787926973282,
+      "f1_at_th": 0.803347280334728,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.9310344827586207,
+        "recall": 0.375,
+        "f1": 0.5346534653465347,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6808510638297872,
+        "recall": 0.9795918367346939,
+        "f1": 0.803347280334728,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl8_md16_ne800\\model.joblib"
+  },
+  {
+    "params": {
+      "min_samples_leaf": 8,
+      "max_depth": 16,
+      "n_estimators": 1000,
+      "random_state": 42,
+      "class_weight": "balanced"
+    },
+    "val_scores": {
+      "roc_auc": 0.7240147028793139,
+      "pr_auc": 0.7718781373138615,
+      "f1_at_best_th": 0.7681159420289855,
+      "best_threshold": 0.3
+    },
+    "test_scores": {
+      "roc_auc": 0.8173185941043084,
+      "pr_auc": 0.8411233025701451,
+      "f1_at_th": 0.803347280334728,
+      "threshold": 0.3,
+      "class_0": {
+        "precision": 0.9310344827586207,
+        "recall": 0.375,
+        "f1": 0.5346534653465347,
+        "support": 72
+      },
+      "class_1": {
+        "precision": 0.6808510638297872,
+        "recall": 0.9795918367346939,
+        "f1": 0.803347280334728,
+        "support": 98
+      }
+    },
+    "model_path": "reports\\runs\\grid_rf\\y_double_bottom\\msl8_md16_ne1000\\model.joblib"
+  }
+]
