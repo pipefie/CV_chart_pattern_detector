@@ -1,0 +1,35 @@
+{
+  "symbol": "AAPL",
+  "timeframe": "1h",
+  "bars": 160,
+  "start_ts": "2024-01-02T14:30:00+00:00",
+  "end_ts": "2024-02-02T19:30:00+00:00",
+  "img_w": 960,
+  "img_h": 640,
+  "dpi": 120,
+  "axes_xlim": [
+    -0.4471875,
+    159.4471875
+  ],
+  "axes_ylim": [
+    179.88670303344728,
+    196.54330490112304
+  ],
+  "axes_bbox_px": [
+    86,
+    15,
+    694,
+    460
+  ],
+  "fig_size_px": [
+    800,
+    533
+  ],
+  "bull_color": "#2ca02c",
+  "bear_color": "#d62728",
+  "wick_px": 2,
+  "body_px": 3,
+  "grid": true,
+  "font": "DejaVu Sans",
+  "font_size": 13
+}

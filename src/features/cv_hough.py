@@ -54,6 +54,17 @@ def _hough_features(edges: np.ndarray, params: Dict) -> Dict[str, float]:
     rho = float(params.get("hough_rho", 1.0))
     theta = np.deg2rad(float(params.get("hough_theta_deg", 1.0)))
     threshold = int(params.get("hough_threshold", 80))
+    
+    # Safety: Check edge density
+    file_params = params # alias
+    n_pixels = edges.size
+    n_edges = np.count_nonzero(edges)
+    density = n_edges / max(1, n_pixels)
+    
+    if density > 0.20:
+        # Just warn, do not skip. User requested full fidelity.
+        LOG.warning(f"High edge density {density:.2f} detected. Hough transform may be slow.")
+
     lines = cv.HoughLines(edges, rho, theta, threshold)
     feats["cv_has_lines"] = 1.0 if lines is not None else 0.0
     if lines is None or len(lines) == 0:
@@ -193,17 +204,35 @@ def extract_cv_features(image_path: str | Path, config: Dict | None) -> Dict[str
         return feats
 
     params = config or {}
+    if not params.get("enabled", True):
+        LOG.debug("CV features disabled via config")
+        return feats
+
     img = _read_gray(Path(image_path))
     if img is None:
         return feats
 
+    LOG.debug("Starting CV extraction for %s", image_path)
+    
     edge_feats, edges = _edge_features(img, params)
     feats.update(edge_feats)
+    LOG.debug("Edges computed")
+    
     feats.update(_hough_features(edges, params))
+    LOG.debug("Hough computed")
+    
     feats.update(_hog_features(img, params))
+    LOG.debug("HOG computed")
+    
     feats.update(_gradient_hist_features(img, params))
+    LOG.debug("Gradients computed")
+    
     feats.update(_contour_features(edges))
+    LOG.debug("Contours computed")
+    
     feats.update(_template_score(img, params))
+    LOG.debug("Template score computed")
+    
     return feats
 
 

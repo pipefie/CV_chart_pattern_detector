@@ -1,0 +1,151 @@
+cv_features:
+  bovw:
+    enabled: true
+    max_descriptors_total: 200000
+    max_keypoints: 500
+    n_clusters: 64
+    random_state: 42
+    sample_images_for_vocab: 2000
+    vocab_path: reports/cv_vocab/bovw_k64_seed42.joblib
+  hough:
+    canny_high: 140
+    canny_low: 40
+    grad_bins: 9
+    hog_win: 64
+    hough_horizontal_deg: 10
+    hough_rho: 1.0
+    hough_theta_deg: 1.0
+    hough_threshold: 70
+    template_width: 64
+dataset:
+  manifest_path: reports/runs/latest/render_manifest.json
+features:
+  candles:
+    enabled: true
+  pattern_proxies:
+    enabled: true
+  swings:
+    enabled: true
+    pivot_left: 3
+    pivot_min_sep: 4
+    pivot_right: 3
+  ta:
+    atr_period: 14
+    ma_periods:
+    - 10
+    - 20
+    - 50
+    roc_periods:
+    - 5
+    - 10
+    - 20
+labeling:
+  labels_post:
+    dedup_time_overlap_bars: 10
+  patterns:
+    ascending_triangle:
+      breakout:
+        confirm:
+          threshold_atr: 0.1
+          threshold_percent: 0.05
+        max_time_to_break_pct: 0.75
+        side: up
+      geometry:
+        duration:
+          max_bars: 150
+          min_bars: 30
+        max_peak_diff_pct: 0.01
+        max_resistance_slope_deg: 8
+        min_lows: 2
+        min_support_slope_deg: 10
+    double_bottom:
+      breakout:
+        confirm:
+          threshold_atr: 0.8
+          threshold_percent: 0.3
+          volume_mult: 1.2
+          within_bars: 14
+        require_confirmation: true
+        side: up
+      geometry:
+        duration:
+          max_bars: 110
+          min_bars: 24
+        dynamic_thresholds:
+          atr_floor_mult: 0.6
+          breakout_height_pct: 9
+          valley_drop_min_height_pct: 18
+          vol_lookback_bars: 36
+        max_pairs_per_peak: 5
+        min_height_atr: 1.1
+        peak_height_similarity_pct: 8
+        peak_rise_min_atr: 1.2
+        peak_rise_min_pct: 0.015
+        valley_min_bars_from_peaks: 3
+        valley_required: true
+      label_allow_pre_breakout: false
+      scoring:
+        weight_span: 0.4
+        weight_valley_depth_atr: 1.0
+    double_top:
+      breakout:
+        confirm:
+          threshold_atr: 0.8
+          threshold_percent: 0.3
+          volume_mult: 1.2
+          within_bars: 14
+        require_confirmation: true
+        side: down
+      geometry:
+        duration:
+          max_bars: 110
+          min_bars: 24
+        dynamic_thresholds:
+          atr_floor_mult: 0.6
+          breakout_height_pct: 9
+          valley_drop_min_height_pct: 18
+          vol_lookback_bars: 36
+        max_pairs_per_peak: 5
+        min_height_atr: 1.1
+        peak_height_similarity_pct: 8
+        peaks: 2
+        valley_drop_min_atr: 1.2
+        valley_drop_min_pct: 0.015
+        valley_min_bars_from_peaks: 3
+        valley_required: true
+      label_allow_pre_breakout: false
+      scoring:
+        weight_span: 0.4
+        weight_valley_depth_atr: 1.0
+    head_and_shoulders:
+      breakout:
+        confirm:
+          threshold_atr: 0.08
+          threshold_percent: 0.05
+          within_bars: 22
+        side: down
+      geometry:
+        duration:
+          max_bars: 180
+          min_bars: 24
+        head_above_shoulders_min_atr: 0.45
+        head_above_shoulders_min_pct: 0.0045
+        neckline:
+          max_slope_deg: 18
+        shoulder_height_similarity_pct: 35
+        shoulder_timing_similarity_pct: 75
+  swing_points:
+    atr_period: 14
+    min_distance_bars: 4
+    prominence_atr: 0.9
+    window: 4
+  units:
+    prefer_atr_over_percent: true
+meta:
+  comment: End-to-end labeling + feature extraction pipeline config
+models:
+  random_forest:
+    max_depth: null
+    min_samples_leaf: 2
+    n_estimators: 600
+    random_state: 42
